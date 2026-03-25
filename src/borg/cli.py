@@ -1,4 +1,5 @@
 """CLI entry point — launches the TUI."""
+
 import typer
 from pathlib import Path
 
@@ -12,7 +13,10 @@ def main(
     db: Path = typer.Option(DEFAULT_DB, "--db", help="Database path"),
 ) -> None:
     """Borg — AI commit adoption tracker. Resistance is futile."""
-    print(f"Borg TUI starting with db: {db}")
+    from borg.ui.app import BorgApp
+
+    tui = BorgApp(db_path=db)
+    tui.run()
 
 
 if __name__ == "__main__":

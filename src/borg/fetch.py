@@ -153,7 +153,7 @@ class GitHubFetcher:
             await asyncio.sleep(wait_seconds)
 
     @staticmethod
-    def _parse_next_url(headers: dict) -> str | None:
+    def _parse_next_url(headers: dict | httpx.Headers) -> str | None:
         """Parse the 'next' URL from a Link header.
 
         Args:
