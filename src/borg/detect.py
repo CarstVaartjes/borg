@@ -118,6 +118,23 @@ def detect_ai(db: Database) -> dict[str, int]:
             "AND message NOT LIKE 'Merge %'"
         )
 
+        # Conventional commit prefix heuristic: messages like "fix: do something"
+        # or "feat: add feature". AI tools commonly produce these short, clean
+        # single-line messages with a conventional prefix.
+        conn.execute(
+            "UPDATE commits SET ai_tool = 'ai-assisted', ai_confidence = 'low' "
+            "WHERE ai_tool IS NULL "
+            "AND ("
+            "  message LIKE 'fix: %' OR message LIKE 'feat: %' OR message LIKE 'chore: %'"
+            "  OR message LIKE 'refactor: %' OR message LIKE 'docs: %' OR message LIKE 'test: %'"
+            "  OR message LIKE 'ci: %' OR message LIKE 'perf: %' OR message LIKE 'style: %'"
+            "  OR message LIKE 'build: %'"
+            ") "
+            "AND message NOT LIKE '%' || char(10) || '%' "
+            "AND length(message) BETWEEN 15 AND 120 "
+            "AND message NOT LIKE 'Merge %'"
+        )
+
         # Bulk heuristic: large additions with few deletions.
         conn.execute(
             "UPDATE commits SET ai_tool = 'unknown', ai_confidence = 'low' "

@@ -202,6 +202,39 @@ def test_ai_style_not_triggered_on_merge_commits(tmp_db: Path) -> None:
     assert row["ai_tool"] is None
 
 
+def test_conventional_commit_heuristic(tmp_db: Path) -> None:
+    """Detects conventional commit prefixes as low-confidence AI."""
+    db = Database(tmp_db)
+    _insert_commit(db, "conv1", "fix: separate approval steps per region for independent deploys")
+    _insert_commit(db, "conv2", "chore: bump vf-trade-promotions version")
+    _insert_commit(db, "conv3", "feat: add calendar dimensions to analytics prompt")
+    detect_ai(db)
+    for sha in ("conv1", "conv2", "conv3"):
+        row = db.conn.execute(f"SELECT ai_tool, ai_confidence FROM commits WHERE sha = '{sha}'").fetchone()
+        assert row["ai_tool"] == "ai-assisted", f"{sha} should be ai-assisted"
+        assert row["ai_confidence"] == "low", f"{sha} should be low confidence"
+
+
+def test_conventional_commit_not_triggered_on_multiline(tmp_db: Path) -> None:
+    """Conventional prefix with multiline body should not match (caught by medium heuristic instead)."""
+    db = Database(tmp_db)
+    msg = "fix: something important\n\nThis is a detailed explanation that goes on for a while and explains the reasoning."
+    _insert_commit(db, "convml", msg)
+    detect_ai(db)
+    row = db.conn.execute("SELECT ai_confidence FROM commits WHERE sha = 'convml'").fetchone()
+    # Should be medium (caught by the structured message heuristic), not low
+    assert row["ai_confidence"] == "medium"
+
+
+def test_conventional_commit_not_triggered_on_too_short(tmp_db: Path) -> None:
+    """Very short conventional commits should not match."""
+    db = Database(tmp_db)
+    _insert_commit(db, "convs", "fix: typo")
+    detect_ai(db)
+    row = db.conn.execute("SELECT ai_tool FROM commits WHERE sha = 'convs'").fetchone()
+    assert row["ai_tool"] is None
+
+
 def test_detect_returns_counts(tmp_db: Path) -> None:
     """detect_ai returns correct count summary."""
     db = Database(tmp_db)
