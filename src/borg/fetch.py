@@ -413,7 +413,10 @@ class GitHubFetcher:
             max_concurrent = 8 if remaining > 1000 else 4
             sem = asyncio.Semaphore(max_concurrent)
 
+            batch_failed_reason = ""
+
             async def _enrich_one(commit: dict) -> bool:
+                nonlocal batch_failed_reason
                 async with sem:
                     try:
                         url = f"{BASE_URL}/repos/{commit['org']}/{commit['repo']}/commits/{commit['sha']}"
@@ -428,8 +431,10 @@ class GitHubFetcher:
                                 commit["sha"], additions, deletions
                             )
                             return True
-                    except Exception:
-                        logger.warning("Failed to enrich commit %s", commit["sha"])
+                    except httpx.HTTPStatusError as e:
+                        batch_failed_reason = f"HTTP {e.response.status_code}"
+                    except Exception as e:
+                        batch_failed_reason = str(e)[:80]
                     return False
 
             results = await asyncio.gather(*[_enrich_one(c) for c in commits])
@@ -441,6 +446,15 @@ class GitHubFetcher:
                 current=total_enriched, total=total_unenriched,
                 message=f"Retrieved additions/deletions: {total_enriched}/{total_unenriched} commits",
             ))
+
+            # If an entire batch failed, stop — likely rate limited or auth issue
+            if batch_enriched == 0:
+                self._emit(FetchProgress(
+                    phase="enrich", org="",
+                    message=f"Stopping enrichment: batch failed ({batch_failed_reason}). "
+                    f"Will retry remaining {total_unenriched - total_enriched} on next fetch.",
+                ))
+                break
 
         return total_enriched
 
