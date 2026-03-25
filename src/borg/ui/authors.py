@@ -148,6 +148,17 @@ class AuthorsTab(Static):
         stats = f"\n  Favourite repo: {fav}\n  Favourite word: {fav_word}\n\n"
         stats += self._side_by_side(day_chart, hour_chart, gap=2)
 
+        # Linked identities
+        id_rows = self.db.conn.execute(
+            f"SELECT DISTINCT author, commits.email FROM commits "
+            f"WHERE commits.email IN ({placeholders}) ORDER BY author",
+            email_list,
+        ).fetchall()
+        if id_rows:
+            stats += "\n\n  Identities:"
+            for r in id_rows:
+                stats += f"\n    {r['author']} <{r['email']}>"
+
         self._set_avatar_text(title + "\n  Loading avatar...")
         self._fetch_avatar(title, stats, tuple(email_list))
 
