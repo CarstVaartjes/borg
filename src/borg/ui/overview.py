@@ -43,13 +43,15 @@ class OverviewTab(Static):
         summary = self.db.query_summary(org)
         total = summary["total_commits"]
         ai = summary["ai_commits"]
-        pct = (ai / total * 100) if total > 0 else 0
+        commit_pct = (ai / total * 100) if total > 0 else 0
         total_loc = summary["total_loc"]
         ai_loc = summary["ai_loc"]
+        loc_pct = (ai_loc / total_loc * 100) if total_loc > 0 else 0
 
         text = (
-            f"Assimilation Progress: {ai} / {total} commits ({pct:.1f}%)\n"
-            f"LOC total: {total_loc:,}  |  AI LOC: {ai_loc:,}"
+            f"Assimilation Progress\n"
+            f"  Commits: {ai:,} / {total:,} ({commit_pct:.1f}%)\n"
+            f"  LOC:     {ai_loc:,} / {total_loc:,} ({loc_pct:.1f}%)"
         )
         try:
             self.query_one("#summary-box", Static).update(text)
