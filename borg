@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_DB="$SCRIPT_DIR/data/tracker.db"
+
+source "$SCRIPT_DIR/lib/db.sh"
+source "$SCRIPT_DIR/lib/fetch.sh"
+source "$SCRIPT_DIR/lib/detect.sh"
+source "$SCRIPT_DIR/lib/report.sh"
+
+usage() {
+    cat <<EOF
+borg — AI commit adoption tracker
+"Resistance is futile"
+
+Usage:
+  borg fetch  --org <org> [--since <date>] [--db <path>]
+  borg report [--top <n>] [--db <path>]
+  borg export [--csv <path>] [--db <path>]
+  borg status [--db <path>]
+
+Commands:
+  fetch    Fetch commits from GitHub org (incremental, rate-limit aware)
+  report   Show AI adoption report with rankings and trends
+  export   Export database to CSV
+  status   Show sync status
+
+Options:
+  --org    GitHub organization (required on first fetch, remembered after)
+  --since  Floor date YYYY-MM-DD (required on first fetch, remembered after)
+  --top    Number of entries in rankings (default: 10)
+  --db     Database path (default: ./data/tracker.db)
+  --csv    CSV output path (default: stdout)
+EOF
+    exit 1
+}
+
+# Parse command
+COMMAND="${1:-}"
+shift || true
+
+if [[ -z "$COMMAND" ]]; then
+    usage
+fi
+
+# Parse flags
+DB="$DEFAULT_DB"
+ORG=""
+SINCE=""
+TOP=10
+CSV=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --org)   ORG="$2"; shift 2 ;;
+        --since) SINCE="$2"; shift 2 ;;
+        --top)   TOP="$2"; shift 2 ;;
+        --db)    DB="$2"; shift 2 ;;
+        --csv)   CSV="$2"; shift 2 ;;
+        *)       echo "Unknown option: $1"; usage ;;
+    esac
+done
+
+# Initialize database
+db_init "$DB"
+
+# Resolve org and since from sync_meta if not provided
+if [[ -z "$ORG" ]]; then
+    ORG=$(db_get_meta "$DB" "org")
+fi
+if [[ -z "$SINCE" ]]; then
+    SINCE=$(db_get_meta "$DB" "default_since")
+fi
+
+case "$COMMAND" in
+    fetch)
+        if [[ -z "$ORG" ]]; then
+            echo "Error: --org required on first run"
+            exit 1
+        fi
+        if [[ -z "$SINCE" ]]; then
+            echo "Error: --since required on first run (e.g. --since 2026-01-01)"
+            exit 1
+        fi
+        db_set_meta "$DB" "org" "$ORG"
+        db_set_meta "$DB" "default_since" "$SINCE"
+        fetch_commits "$DB" "$ORG" "$SINCE"
+        detect_ai "$DB"
+        ;;
+    report)
+        if [[ -z "$ORG" ]]; then
+            echo "Error: no data yet. Run 'borg fetch' first."
+            exit 1
+        fi
+        report_show "$DB" "$ORG" "$SINCE" "$TOP"
+        ;;
+    export)
+        if [[ -z "$CSV" ]]; then
+            CSV="/dev/stdout"
+        fi
+        db_export_csv "$DB" "$CSV"
+        ;;
+    status)
+        db_show_status "$DB"
+        ;;
+    *)
+        echo "Unknown command: $COMMAND"
+        usage
+        ;;
+esac
