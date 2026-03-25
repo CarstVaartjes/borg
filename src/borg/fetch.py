@@ -205,6 +205,7 @@ class GitHubFetcher:
         in_production: bool = False,
         pr_number: int | None = None,
         pr_state: str | None = None,
+        since: str | None = None,
     ) -> tuple[int, int, str | None]:
         """Fetch paginated commits from a URL, inserting new ones.
 
@@ -231,6 +232,10 @@ class GitHubFetcher:
                 commit_data = c["commit"]
                 author = commit_data["author"]
                 date = author["date"]
+
+                # Skip commits before the org's floor date
+                if since and date and date < since:
+                    continue
 
                 was_new = self._db.insert_commit(
                     sha=c["sha"],
@@ -283,7 +288,7 @@ class GitHubFetcher:
             phase="commits", org=org, repo=repo,
             message=f"Fetching {repo} PR commits...",
         ))
-        inserted, newest_date = await self._fetch_pr_commits(org, repo, since_date)
+        inserted, newest_date = await self._fetch_pr_commits(org, repo, since_date, since)
 
         # Update repo sync bookmark
         if newest_date:
@@ -293,7 +298,7 @@ class GitHubFetcher:
         return inserted
 
     async def _fetch_pr_commits(
-        self, org: str, repo: str, since: str
+        self, org: str, repo: str, since: str, commit_floor: str | None = None
     ) -> tuple[int, str | None]:
         """Fetch individual commits from merged PRs to capture AI trailers.
 
@@ -362,6 +367,7 @@ class GitHubFetcher:
                 in_production=is_production,
                 pr_number=pr["number"],
                 pr_state=pr_state_val,
+                since=commit_floor,
             )
             inserted += pr_new
 
