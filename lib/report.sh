@@ -75,21 +75,21 @@ print_ranking() {
 # ---------------------------------------------------------------------------
 
 report_header() {
-    local db="$1" org="$2" since="$3"
+    local db="$1" title_org="$2" org_where="$3"
 
     local total_commits ai_commits total_loc ai_loc
 
-    total_commits=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits;")
-    ai_commits=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits WHERE ai_confidence = 'high';")
-    total_loc=$(sqlite3 "$db" "SELECT COALESCE(SUM($LOC_EXPR),0) FROM commits;")
-    ai_loc=$(sqlite3 "$db" "SELECT COALESCE(SUM($LOC_EXPR),0) FROM commits WHERE ai_confidence = 'high';")
+    total_commits=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits WHERE $org_where;")
+    ai_commits=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits WHERE $org_where AND ai_confidence = 'high';")
+    total_loc=$(sqlite3 "$db" "SELECT COALESCE(SUM($LOC_EXPR),0) FROM commits WHERE $org_where;")
+    ai_loc=$(sqlite3 "$db" "SELECT COALESCE(SUM($LOC_EXPR),0) FROM commits WHERE $org_where AND ai_confidence = 'high';")
 
     local commit_pct loc_pct
     commit_pct=$(pct "$ai_commits" "$total_commits")
     loc_pct=$(pct "$ai_loc" "$total_loc")
 
     local header
-    header=$(printf "Borg — AI Commit Adoption — %s — since %s\n" "$org" "$since")
+    header=$(printf "Borg — AI Commit Adoption — %s\n" "$title_org")
     header+=$(printf "\nCommits: %s AI-assisted / %s total  (%s%%)" \
         "$(format_number "$ai_commits")" \
         "$(format_number "$total_commits")" \
@@ -104,13 +104,13 @@ report_header() {
 }
 
 report_by_tool() {
-    local db="$1"
+    local db="$1" org_where="$2"
 
     local rows
     rows=$(sqlite3 -separator '|' "$db" \
         "SELECT ai_tool, COUNT(*), SUM($LOC_EXPR)
          FROM commits
-         WHERE ai_confidence = 'high'
+         WHERE $org_where AND ai_confidence = 'high'
          GROUP BY ai_tool
          ORDER BY COUNT(*) DESC;")
 
@@ -133,7 +133,7 @@ report_by_tool() {
 # Renders top/bottom rankings by AI commits and AI LOC
 # $1=db $2=top $3=group_col ("author" or "repo") $4=label ("Author" or "Repo")
 report_rankings() {
-    local db="$1" top="$2" group_col="$3" label="$4"
+    local db="$1" top="$2" group_col="$3" label="$4" org_where="$5"
 
     # Exclude entries with 5 or fewer commits to reduce noise
     local sql_base
@@ -143,6 +143,7 @@ report_rankings() {
        SUM(CASE WHEN ai_confidence = 'high' THEN $LOC_EXPR ELSE 0 END) as ai_loc,
        SUM($LOC_EXPR) as total_loc
      FROM commits
+     WHERE $org_where
      GROUP BY $group_col
      HAVING COUNT(*) > 5"
 
@@ -170,7 +171,7 @@ report_rankings() {
 # Renders a time-based trend report
 # $1=db $2=strftime_fmt $3=col_alias $4=section_title
 report_time_trend() {
-    local db="$1" strftime_fmt="$2" col_alias="$3" title="$4"
+    local db="$1" strftime_fmt="$2" col_alias="$3" title="$4" org_where="$5"
 
     local rows
     rows=$(sqlite3 -separator '|' "$db" \
@@ -180,6 +181,7 @@ report_time_trend() {
                 SUM($LOC_EXPR) as total_loc,
                 SUM(CASE WHEN ai_confidence = 'high' THEN $LOC_EXPR ELSE 0 END) as ai_loc
          FROM commits
+         WHERE $org_where
          GROUP BY $col_alias
          ORDER BY $col_alias;")
 
@@ -218,12 +220,22 @@ report_time_trend() {
 # ---------------------------------------------------------------------------
 
 report_show() {
-    local db="$1" org="$2" since="$3" top="$4"
-    report_header "$db" "$org" "$since"
-    report_by_tool "$db"
-    report_rankings "$db" "$top" "author" "Author"
-    report_rankings "$db" "$top" "repo" "Repo"
-    report_time_trend "$db" '%Y-%m' "month" "Monthly trend:"
-    report_time_trend "$db" '%Y-W%W' "week" "Weekly trend:"
+    local db="$1" org_filter="$2" top="$3"
+
+    local org_where="1=1"
+    local title_org="All orgs"
+    if [[ -n "$org_filter" ]]; then
+        local e_org
+        e_org=$(sql_escape "$org_filter")
+        org_where="org = '$e_org'"
+        title_org="$org_filter"
+    fi
+
+    report_header "$db" "$title_org" "$org_where"
+    report_by_tool "$db" "$org_where"
+    report_rankings "$db" "$top" "author" "Author" "$org_where"
+    report_rankings "$db" "$top" "repo" "Repo" "$org_where"
+    report_time_trend "$db" '%Y-%m' "month" "Monthly trend:" "$org_where"
+    report_time_trend "$db" '%Y-W%W' "week" "Weekly trend:" "$org_where"
     echo ""
 }
