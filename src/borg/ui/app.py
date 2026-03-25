@@ -7,7 +7,7 @@ from textual.binding import Binding
 from textual.containers import Container
 from textual.widgets import Footer, Header, Label, Select, TabbedContent, TabPane
 
-from borg.db import Database
+from borg.db import Database, QueryFilters
 from borg.ui.authors import AuthorsTab
 from borg.ui.export_tab import ExportTab
 from borg.ui.fetch_tab import FetchTab
@@ -34,8 +34,12 @@ class BorgApp(App):
         width: auto;
         padding: 1 1 0 0;
     }
-    #org-select {
-        width: 40;
+    #org-bar Select {
+        width: 1fr;
+        max-width: 30;
+    }
+    #loc-select {
+        max-width: 20;
     }
     TabbedContent {
         height: 1fr;
@@ -130,26 +134,39 @@ class BorgApp(App):
     ]
 
     org_filter: str | None = None
+    repo_filter: str | None = None
+    author_filter: str | None = None
+    loc_mode: str = "both"
 
     def __init__(self, db_path: Path) -> None:
-        """Initialize app with database path.
-
-        Args:
-            db_path: Path to the SQLite database file.
-        """
         super().__init__()
         self.db = Database(db_path)
 
+    @property
+    def query_filters(self) -> QueryFilters:
+        """Current filter state as a QueryFilters object."""
+        return QueryFilters(
+            org=self.org_filter,
+            repo=self.repo_filter,
+            author=self.author_filter,
+            loc_mode=self.loc_mode,
+        )
+
     def compose(self) -> ComposeResult:
-        """Build the app layout."""
         yield Header()
         with Container(id="org-bar"):
             yield Label("Org:")
+            yield Select([], prompt="All orgs", allow_blank=True, id="org-select")
+            yield Label("Repo:")
+            yield Select([], prompt="All repos", allow_blank=True, id="repo-select")
+            yield Label("Author:")
+            yield Select([], prompt="All authors", allow_blank=True, id="author-select")
+            yield Label("LOC:")
             yield Select(
-                [],
-                prompt="All orgs",
-                allow_blank=True,
-                id="org-select",
+                [("Added + Deleted", "both"), ("Added only", "added")],
+                value="both",
+                allow_blank=False,
+                id="loc-select",
             )
         with TabbedContent(id="tabs"):
             with TabPane("Overview", id="overview"):
@@ -171,27 +188,59 @@ class BorgApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        """Initialize after mount: refresh org dropdown, auto-switch to Orgs tab."""
-        self.refresh_org_dropdown()
+        self.refresh_dropdowns()
         orgs = self.db.org_get_all()
         if not orgs:
             self.query_one(TabbedContent).active = "orgs"
         else:
             self._refresh_active_tab()
 
-    def refresh_org_dropdown(self) -> None:
-        """Reload the org filter dropdown from the database."""
+    def refresh_dropdowns(self) -> None:
+        """Reload all filter dropdowns from the database."""
+        # Orgs
         orgs = self.db.org_get_all()
-        select = self.query_one("#org-select", Select)
-        options = [(org["name"], org["name"]) for org in orgs]
-        select.set_options(options)
+        self.query_one("#org-select", Select).set_options(
+            [(o["name"], o["name"]) for o in orgs]
+        )
+        # Repos
+        repos = self.db.conn.execute(
+            "SELECT DISTINCT repo FROM commits ORDER BY repo"
+        ).fetchall()
+        self.query_one("#repo-select", Select).set_options(
+            [(r["repo"], r["repo"]) for r in repos]
+        )
+        # Authors (from identity table if available)
+        try:
+            authors = self.db.conn.execute(
+                "SELECT DISTINCT canonical_name FROM _author_identity ORDER BY canonical_name"
+            ).fetchall()
+            self.query_one("#author-select", Select).set_options(
+                [(a["canonical_name"], a["canonical_name"]) for a in authors]
+            )
+        except Exception:
+            authors = self.db.conn.execute(
+                "SELECT DISTINCT author FROM commits ORDER BY author"
+            ).fetchall()
+            self.query_one("#author-select", Select).set_options(
+                [(a["author"], a["author"]) for a in authors]
+            )
+
+    # Keep backward-compatible alias
+    def refresh_org_dropdown(self) -> None:
+        self.refresh_dropdowns()
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        """Handle org filter dropdown change."""
-        if event.select.id == "org-select":
-            value = event.value
-            self.org_filter = None if value is Select.BLANK else str(value)
-            self._refresh_active_tab()
+        sid = event.select.id
+        value = None if event.value is Select.BLANK else str(event.value)
+        if sid == "org-select":
+            self.org_filter = value
+        elif sid == "repo-select":
+            self.repo_filter = value
+        elif sid == "author-select":
+            self.author_filter = value
+        elif sid == "loc-select":
+            self.loc_mode = value or "both"
+        self._refresh_active_tab()
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated
@@ -221,7 +270,7 @@ class BorgApp(App):
             try:
                 widget = self.query_one(f"#{active_pane} {widget_class.__name__}")
                 if hasattr(widget, "refresh_data"):
-                    widget.refresh_data(org=self.org_filter)
+                    widget.refresh_data(filters=self.query_filters)
             except Exception:
                 pass
 

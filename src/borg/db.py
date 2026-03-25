@@ -6,8 +6,19 @@ and report queries.
 
 import csv
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+@dataclass
+class QueryFilters:
+    """Filters applied to report queries."""
+
+    org: str | None = None
+    repo: str | None = None
+    author: str | None = None
+    loc_mode: str = "both"  # "both" = additions+deletions, "added" = additions only
 
 
 class Database:
@@ -337,27 +348,67 @@ class Database:
         ]
 
     @staticmethod
-    def _org_filter(org: str | None) -> tuple[str, tuple[str, ...] | tuple[()]]:
-        """Build a WHERE clause fragment for optional org filtering.
-
-        Always excludes merge commits (they're GitHub-generated artifacts
-        without meaningful authorship or AI trailers).
+    def loc_expr(mode: str = "both") -> str:
+        """SQL expression for lines of code based on mode.
 
         Args:
-            org: Org name to filter by, or None for all orgs.
+            mode: "added" for additions only, "both" for additions + deletions.
+        """
+        if mode == "added":
+            return "COALESCE(additions, 0)"
+        return "COALESCE(additions, 0) + COALESCE(deletions, 0)"
+
+    def _build_filter(
+        self,
+        org: str | None = None,
+        repo: str | None = None,
+        author: str | None = None,
+    ) -> tuple[str, tuple]:
+        """Build a WHERE clause fragment with optional org/repo/author filters.
+
+        Always excludes merge commits, reverts, and conflict resolutions.
+
+        Args:
+            org: Org name to filter by, or None.
+            repo: Repo name to filter by, or None.
+            author: Author canonical name to filter by, or None.
 
         Returns:
             Tuple of (where_clause, params_tuple).
         """
-        merge_filter = (
-            "message NOT LIKE 'Merge %' "
-            "AND message NOT LIKE 'Revert %' "
-            "AND message NOT LIKE 'Resolve conflict%' "
-            "AND message NOT LIKE '%merge conflict%'"
-        )
-        if org is None:
-            return (merge_filter, ())
-        return (f"org = ? AND {merge_filter}", (org,))
+        clauses = [
+            "message NOT LIKE 'Merge %'",
+            "message NOT LIKE 'Revert %'",
+            "message NOT LIKE 'Resolve conflict%'",
+            "message NOT LIKE '%merge conflict%'",
+        ]
+        params: list = []
+
+        if org:
+            clauses.append("org = ?")
+            params.append(org)
+        if repo:
+            clauses.append("repo = ?")
+            params.append(repo)
+        if author:
+            # Use identity table if available
+            try:
+                self.conn.execute("SELECT 1 FROM _author_identity LIMIT 1")
+                clauses.append(
+                    "email IN (SELECT email FROM _author_identity WHERE canonical_name = ?)"
+                )
+            except Exception:
+                clauses.append(
+                    "email IN (SELECT DISTINCT email FROM commits WHERE author = ?)"
+                )
+            params.append(author)
+
+        return (" AND ".join(clauses), tuple(params))
+
+    # Keep backward-compatible shortcut
+    def _org_filter(self, org: str | None = None) -> tuple[str, tuple]:
+        """Shortcut for _build_filter with just org."""
+        return self._build_filter(org=org)
 
     # ── Org CRUD ──────────────────────────────────────────────────────
 
@@ -469,23 +520,18 @@ class Database:
 
     # ── Report queries ────────────────────────────────────────────────
 
-    def query_summary(self, org: str | None = None) -> dict:
-        """Get summary statistics.
-
-        Args:
-            org: Optional org filter.
-
-        Returns:
-            Dict with total_commits, ai_commits, total_loc, ai_loc.
-        """
-        where, params = self._org_filter(org)
+    def query_summary(self, org: str | None = None, filters: QueryFilters | None = None) -> dict:
+        """Get summary statistics."""
+        f = filters or QueryFilters(org=org)
+        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author)
+        loc = self.loc_expr(f.loc_mode)
         row = self.conn.execute(
             f"""
             SELECT
                 COUNT(*) AS total_commits,
                 SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN 1 ELSE 0 END) AS ai_commits,
-                COALESCE(SUM(additions), 0) AS total_loc,
-                COALESCE(SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN additions ELSE 0 END), 0) AS ai_loc
+                COALESCE(SUM({loc}), 0) AS total_loc,
+                COALESCE(SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN {loc} ELSE 0 END), 0) AS ai_loc
             FROM commits
             WHERE {where}
         """,
@@ -493,22 +539,17 @@ class Database:
         ).fetchone()
         return dict(row)
 
-    def query_by_tool(self, org: str | None = None) -> list[dict]:
-        """Get commit counts grouped by AI tool.
-
-        Args:
-            org: Optional org filter.
-
-        Returns:
-            List of dicts with tool, commits, loc.
-        """
-        where, params = self._org_filter(org)
+    def query_by_tool(self, org: str | None = None, filters: QueryFilters | None = None) -> list[dict]:
+        """Get commit counts grouped by AI tool."""
+        f = filters or QueryFilters(org=org)
+        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author)
+        loc = self.loc_expr(f.loc_mode)
         rows = self.conn.execute(
             f"""
             SELECT
                 ai_tool AS tool,
                 COUNT(*) AS commits,
-                COALESCE(SUM(additions), 0) AS loc
+                COALESCE(SUM({loc}), 0) AS loc
             FROM commits
             WHERE ai_tool IS NOT NULL AND ai_tool != '' AND {where}
             GROUP BY ai_tool
@@ -526,27 +567,17 @@ class Database:
         min_commits: int = 5,
         order_by: str = "ai_commits",
         ascending: bool = False,
+        filters: QueryFilters | None = None,
     ) -> list[dict]:
-        """Get rankings by author or repo.
-
-        Args:
-            group_by: Column to group by ('author' or 'repo').
-            org: Optional org filter.
-            limit: Max results to return.
-            min_commits: Minimum total commits to be included.
-            order_by: Column to sort by.
-            ascending: Sort ascending if True, descending if False.
-
-        Returns:
-            List of ranked dicts.
-        """
-        # Validate group_by to prevent SQL injection (it's interpolated)
+        """Get rankings by author or repo."""
         if group_by not in ("author", "repo"):
             raise ValueError(f"Invalid group_by: {group_by}")
         if order_by not in ("ai_commits", "total_commits", "ai_loc", "total_loc"):
             raise ValueError(f"Invalid order_by: {order_by}")
 
-        where, params = self._org_filter(org)
+        f = filters or QueryFilters(org=org)
+        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author)
+        loc = self.loc_expr(f.loc_mode)
         direction = "ASC" if ascending else "DESC"
 
         if group_by == "author":
@@ -577,8 +608,8 @@ class Database:
                 {name_expr},
                 COUNT(*) AS total_commits,
                 SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN 1 ELSE 0 END) AS ai_commits,
-                COALESCE(SUM(additions), 0) AS total_loc,
-                COALESCE(SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN additions ELSE 0 END), 0) AS ai_loc
+                COALESCE(SUM({loc}), 0) AS total_loc,
+                COALESCE(SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN {loc} ELSE 0 END), 0) AS ai_loc
             {from_clause}
             WHERE {where}
             GROUP BY {group_col}
@@ -594,21 +625,13 @@ class Database:
         self,
         period: str = "monthly",
         org: str | None = None,
+        filters: QueryFilters | None = None,
     ) -> list[dict]:
-        """Get commit trends over time.
-
-        Args:
-            period: 'monthly' or 'weekly'.
-            org: Optional org filter.
-
-        Returns:
-            List of dicts with period, total, ai, total_loc, ai_loc.
-        """
-        where, params = self._org_filter(org)
-        if period == "weekly":
-            period_expr = "strftime('%Y-W%W', date)"
-        else:
-            period_expr = "strftime('%Y-%m', date)"
+        """Get commit trends over time."""
+        f = filters or QueryFilters(org=org)
+        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author)
+        loc = self.loc_expr(f.loc_mode)
+        period_expr = "strftime('%Y-W%W', date)" if period == "weekly" else "strftime('%Y-%m', date)"
 
         rows = self.conn.execute(
             f"""
@@ -616,8 +639,8 @@ class Database:
                 {period_expr} AS period,
                 COUNT(*) AS total,
                 SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN 1 ELSE 0 END) AS ai,
-                COALESCE(SUM(additions), 0) AS total_loc,
-                COALESCE(SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN additions ELSE 0 END), 0) AS ai_loc
+                COALESCE(SUM({loc}), 0) AS total_loc,
+                COALESCE(SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN {loc} ELSE 0 END), 0) AS ai_loc
             FROM commits
             WHERE {where}
             GROUP BY period
@@ -627,16 +650,10 @@ class Database:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def query_skynet_employee(self, org: str | None = None) -> dict | None:
-        """Get the author with the most AI commits in the last 7 days.
-
-        Args:
-            org: Optional org filter.
-
-        Returns:
-            Dict with author and ai_commits, or None.
-        """
-        where, params = self._org_filter(org)
+    def query_skynet_employee(self, org: str | None = None, filters: QueryFilters | None = None) -> dict | None:
+        """Get the author with the most AI commits in the last 7 days."""
+        f = filters or QueryFilters(org=org)
+        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author)
         try:
             self.conn.execute("SELECT 1 FROM _author_identity LIMIT 1")
             name_expr = "COALESCE(aid.canonical_name, commits.author)"
@@ -821,16 +838,18 @@ class Database:
         self.conn.commit()
 
     def get_unenriched_commits(self, limit: int = 100) -> list[dict]:
-        """Get commits that haven't been enriched with stats.
+        """Get commits that need enrichment (no additions data yet).
 
-        Args:
-            limit: Max rows to return.
-
-        Returns:
-            List of commit dicts without additions data.
+        Skips merge/revert/conflict commits since they're excluded from stats.
         """
         rows = self.conn.execute(
-            "SELECT * FROM commits WHERE additions IS NULL ORDER BY date LIMIT ?",
+            "SELECT sha, org, repo FROM commits "
+            "WHERE additions IS NULL "
+            "AND message NOT LIKE 'Merge %' "
+            "AND message NOT LIKE 'Revert %' "
+            "AND message NOT LIKE 'Resolve conflict%' "
+            "AND message NOT LIKE '%merge conflict%' "
+            "ORDER BY date LIMIT ?",
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]

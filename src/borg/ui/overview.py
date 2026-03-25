@@ -6,7 +6,7 @@ from textual.widgets import Static
 
 from textual_plotext import PlotextPlot
 
-from borg.db import Database
+from borg.db import Database, QueryFilters
 
 
 class OverviewTab(Static):
@@ -28,19 +28,14 @@ class OverviewTab(Static):
             yield Static(id="skynet-box")
             yield PlotextPlot(id="tool-chart")
 
-    def refresh_data(self, org: str | None = None) -> None:
-        """Refresh all overview data.
+    def refresh_data(self, org: str | None = None, filters: QueryFilters | None = None) -> None:
+        f = filters or QueryFilters(org=org)
+        self._update_summary(f)
+        self._update_skynet(f)
+        self._update_tool_chart(f)
 
-        Args:
-            org: Optional org filter.
-        """
-        self._update_summary(org)
-        self._update_skynet(org)
-        self._update_tool_chart(org)
-
-    def _update_summary(self, org: str | None) -> None:
-        """Update the summary statistics box."""
-        summary = self.db.query_summary(org)
+    def _update_summary(self, f: QueryFilters) -> None:
+        summary = self.db.query_summary(filters=f)
         total = summary["total_commits"]
         ai = summary["ai_commits"]
         commit_pct = (ai / total * 100) if total > 0 else 0
@@ -58,9 +53,8 @@ class OverviewTab(Static):
         except Exception:
             pass
 
-    def _update_skynet(self, org: str | None) -> None:
-        """Update the Skynet Employee of the Week box."""
-        employee = self.db.query_skynet_employee(org)
+    def _update_skynet(self, f: QueryFilters) -> None:
+        employee = self.db.query_skynet_employee(filters=f)
         if employee:
             text = (
                 f"Skynet Employee of the Week: "
@@ -73,9 +67,8 @@ class OverviewTab(Static):
         except Exception:
             pass
 
-    def _update_tool_chart(self, org: str | None) -> None:
-        """Update the horizontal bar chart of AI tools."""
-        tools = self.db.query_by_tool(org)
+    def _update_tool_chart(self, f: QueryFilters) -> None:
+        tools = self.db.query_by_tool(filters=f)
         try:
             chart = self.query_one("#tool-chart", PlotextPlot)
         except Exception:

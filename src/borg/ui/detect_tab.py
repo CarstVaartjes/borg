@@ -34,7 +34,7 @@ class DetectTab(Static):
         for tool, confidence, pattern in RULES:
             table.add_row(tool, confidence, pattern[:80])
 
-    def refresh_data(self, org: str | None = None) -> None:
+    def refresh_data(self, **kwargs) -> None:
         """No-op refresh for detect tab.
 
         Args:

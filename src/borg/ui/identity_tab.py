@@ -53,7 +53,7 @@ class IdentityTab(Static):
 
         self._refresh_all()
 
-    def refresh_data(self, org: str | None = None) -> None:
+    def refresh_data(self, **kwargs) -> None:
         self._refresh_all()
 
     def _refresh_all(self) -> None:

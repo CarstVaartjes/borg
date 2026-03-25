@@ -6,7 +6,7 @@ from textual.widgets import Static
 
 from textual_plotext import PlotextPlot
 
-from borg.db import Database
+from borg.db import Database, QueryFilters
 
 
 class TrendsTab(Static):
@@ -27,29 +27,19 @@ class TrendsTab(Static):
             yield PlotextPlot(id="monthly-chart")
             yield PlotextPlot(id="weekly-chart")
 
-    def refresh_data(self, org: str | None = None) -> None:
-        """Refresh both trend charts.
+    def refresh_data(self, org: str | None = None, filters: QueryFilters | None = None) -> None:
+        f = filters or QueryFilters(org=org)
+        self._update_chart("monthly", f)
+        self._update_chart("weekly", f)
 
-        Args:
-            org: Optional org filter.
-        """
-        self._update_chart("monthly", org)
-        self._update_chart("weekly", org)
-
-    def _update_chart(self, period: str, org: str | None) -> None:
-        """Update a single trend chart.
-
-        Args:
-            period: 'monthly' or 'weekly'.
-            org: Optional org filter.
-        """
+    def _update_chart(self, period: str, f: QueryFilters) -> None:
         chart_id = f"#{period}-chart"
         try:
             chart = self.query_one(chart_id, PlotextPlot)
         except Exception:
             return
 
-        data = self.db.query_trends(period=period, org=org)
+        data = self.db.query_trends(period=period, filters=f)
         plt = chart.plt
         plt.clear_figure()
 

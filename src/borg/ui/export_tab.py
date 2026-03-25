@@ -32,7 +32,7 @@ class ExportTab(Static):
             yield Button("Export", id="export-btn", variant="primary")
             yield Static("", id="export-result")
 
-    def refresh_data(self, org: str | None = None) -> None:
+    def refresh_data(self, **kwargs) -> None:
         """No-op refresh for export tab.
 
         Args:

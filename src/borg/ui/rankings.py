@@ -3,7 +3,7 @@
 from textual.app import ComposeResult
 from textual.widgets import DataTable, Static
 
-from borg.db import Database
+from borg.db import Database, QueryFilters
 from borg.ui.commit_modal import CommitDetailModal
 
 # Map display column names to db query order_by values.
@@ -37,17 +37,18 @@ class RankingTab(Static):
         table = self.query_one("#ranking-table", DataTable)
         table.add_columns(self.label, "AI", "Total", "%", "AI LOC", "Total LOC", "LOC %")
 
-    def refresh_data(self, org: str | None = None) -> None:
+    def refresh_data(self, org: str | None = None, filters: QueryFilters | None = None) -> None:
+        f = filters or QueryFilters(org=org)
         table = self.query_one("#ranking-table", DataTable)
         table.clear()
 
         rows = self.db.query_rankings(
             group_by=self.group_by,
-            org=org,
             limit=50,
             min_commits=1,
             order_by=self._order_by,
             ascending=self._ascending,
+            filters=f,
         )
 
         for row in rows:
@@ -77,7 +78,7 @@ class RankingTab(Static):
         else:
             self._order_by = db_col
             self._ascending = False
-        self.refresh_data(org=self.app.org_filter)
+        self.refresh_data(filters=self.app.query_filters)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         table = self.query_one("#ranking-table", DataTable)

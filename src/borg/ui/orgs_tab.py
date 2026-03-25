@@ -46,7 +46,7 @@ class OrgsTab(Static):
         table.add_columns("Name", "Since", "Commits", "Added")
         self._refresh_table()
 
-    def refresh_data(self, org: str | None = None) -> None:
+    def refresh_data(self, **kwargs) -> None:
         """Refresh the orgs table.
 
         Args:
