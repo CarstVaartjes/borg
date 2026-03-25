@@ -130,10 +130,10 @@ class BorgApp(App):
     """
 
     BINDINGS = [
-        Binding("1", "show_tab('overview')", "Overview"),
-        Binding("2", "show_tab('authors')", "Authors"),
-        Binding("3", "show_tab('repos')", "Repos"),
-        Binding("4", "show_tab('trends')", "Trends"),
+        Binding("1", "show_tab('authors')", "Authors"),
+        Binding("2", "show_tab('repos')", "Repos"),
+        Binding("3", "show_tab('trends')", "Trends"),
+        Binding("4", "show_tab('source')", "Source"),
         Binding("5", "show_tab('fetch')", "Fetch"),
         Binding("6", "show_tab('export')", "Export"),
         Binding("7", "show_tab('identity')", "Identity"),
@@ -176,15 +176,15 @@ class BorgApp(App):
                 allow_blank=False,
                 id="loc-select",
             )
-        with TabbedContent(id="tabs"):
-            with TabPane("Overview", id="overview"):
-                yield OverviewTab(self.db)
+        with TabbedContent(id="tabs", initial="authors"):
             with TabPane("Authors", id="authors"):
                 yield AuthorsTab(self.db)
             with TabPane("Repos", id="repos"):
                 yield ReposTab(self.db)
             with TabPane("Trends", id="trends"):
                 yield TrendsTab(self.db)
+            with TabPane("Source", id="source"):
+                yield OverviewTab(self.db)
             with TabPane("Fetch", id="fetch"):
                 yield FetchTab(self.db)
             with TabPane("Export", id="export"):
@@ -264,10 +264,10 @@ class BorgApp(App):
             return
 
         tab_map = {
-            "overview": OverviewTab,
             "authors": AuthorsTab,
             "repos": ReposTab,
             "trends": TrendsTab,
+            "source": OverviewTab,
             "fetch": FetchTab,
             "export": ExportTab,
             "identity": IdentityTab,
