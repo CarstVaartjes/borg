@@ -308,6 +308,7 @@ class GitHubFetcher:
         """
         inserted = 0
         newest_date: str | None = None
+        pr_count = 0
 
         # Fetch all PRs (open + closed), sorted by recently updated.
         # All PRs are included — merged, open, and abandoned — because
@@ -355,11 +356,12 @@ class GitHubFetcher:
                 is_production = bool(merged_at) and base_branch in ("main", "master")
 
                 # Fetch individual commits for this PR
+                pr_count += 1
                 pr_title = pr.get("title", "")[:50]
                 self._emit(FetchProgress(
                     phase="commits", org=org, repo=repo,
                     current=inserted,
-                    message=f"  PR #{pr['number']} [{pr_state_val}] {pr_title} ({inserted} new)",
+                    message=f"  PR {pr_count}: #{pr['number']} [{pr_state_val}] {pr_title} ({inserted} commits)",
                 ))
                 pr_url = f"{BASE_URL}/repos/{org}/{repo}/pulls/{pr['number']}/commits?per_page=100"
                 pr_inserted, pr_commit_date = await self._fetch_paginated_commits(
@@ -376,6 +378,11 @@ class GitHubFetcher:
                 break
             url = self._parse_next_url(resp.headers)
 
+        self._emit(FetchProgress(
+            phase="commits", org=org, repo=repo,
+            current=inserted,
+            message=f"  {repo}: {pr_count} PRs scanned, {inserted} commits",
+        ))
         return inserted, newest_date
 
     async def enrich_commits(self) -> int:
