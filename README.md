@@ -59,9 +59,36 @@ Everything happens inside the TUI — no subcommands needed.
 4. Go to **Fetch** tab (press `5`) and click "Start Fetch"
 5. Explore results in Overview, Authors, Repos, and Trends tabs
 
-## AI Detection
+## How It Works
 
-Detects AI-assisted commits by matching `Co-Authored-By` trailers in commit messages.
+### Fetching — PR-Based Approach
+
+Borg fetches commits from **pull requests**, not from the default branch. This is critical for organizations that use squash merges, because GitHub's squash merge creates a new commit on main that **strips `Co-Authored-By` trailers** from the original commits. By fetching the individual PR commits, borg recovers the AI tool signatures that would otherwise be lost.
+
+**Fetch flow per repo:**
+1. List all PRs (merged, open, and closed) updated since the floor date
+2. For each PR, fetch its individual commits via `/pulls/{number}/commits`
+3. Insert commits into SQLite (`INSERT OR IGNORE` deduplicates by SHA)
+4. After all repos: enrich commits with additions/deletions stats (parallel)
+5. Run AI detection on all commits
+
+**All PR states are included** — merged, open, and abandoned (closed without merge) — because this tracks development effort, not just what shipped to production.
+
+### Production Tracking
+
+Each commit has an `in_production` flag:
+- **`0` (default)** — commit exists in a PR but hasn't reached main/master
+- **`1`** — the PR was merged into main or master
+
+A commit can flow through multiple PRs (feature → uat → preprod → main). It starts at `0` and gets promoted to `1` when any PR targeting main/master is processed. Since squash merges create new SHAs, the original PR commits will typically remain `in_production = 0` in squash-merge workflows — this is expected.
+
+### Author Grouping
+
+Authors are grouped by **email address**, not display name. This automatically merges aliases (e.g. `ctselas7` and `Christos Tselas` using the same email). The most frequently used display name is shown in rankings.
+
+### AI Detection
+
+Detects AI-assisted commits by matching `Co-Authored-By` trailers in commit messages. Runs locally — no API calls. Detection runs inside a transaction so rule changes apply retroactively without data loss.
 
 | Tool | Detection Pattern | Confidence |
 |------|------------------|------------|
@@ -78,15 +105,32 @@ Detects AI-assisted commits by matching `Co-Authored-By` trailers in commit mess
 | Tabnine | `Co-Authored-By:.*Tabnine` | high |
 | Bulk addition | `additions > 100 AND deletions < 10` | low |
 
-## Rate Limit Handling
+### Known Limitations
+
+- **Squash merges hide trailers**: If your org uses squash merges, the individual PR commits have the trailers but the squash commit on main doesn't. Borg fetches PR commits to work around this, but `in_production` tracking is limited since the original SHAs never appear on main.
+- **No trailer = no detection**: If a developer uses an AI tool but commits without the `Co-Authored-By` trailer (e.g. manually writing the commit message), borg can't detect it.
+- **PR commits endpoint has no `since` filter**: The GitHub `/pulls/{n}/commits` API returns all commits in a PR. For long-lived PRs opened before the floor date, some older commits may be included.
+
+### Rate Limit Handling
 
 GitHub allows 5,000 API calls/hour. Borg monitors usage and adapts:
 
 | Remaining | Behavior |
 |-----------|----------|
-| > 500 | 8 parallel fetches |
-| 200-500 | 4 parallel fetches |
+| > 1,000 | 8 parallel enrichment fetches |
+| 200-1,000 | 4 parallel enrichment fetches |
 | < 200 | Auto-wait until reset, then resume |
+
+### Data Storage
+
+All data is stored in a local SQLite database. The schema tracks:
+
+| Table | Purpose |
+|-------|---------|
+| `orgs` | Registered organizations with floor dates |
+| `commits` | Commit metadata, AI detection, production status, PR linkage |
+| `repo_sync` | Per-org/repo sync bookmarks for incremental fetching |
+| `sync_meta` | Key-value config (last run time) |
 
 ## Requirements
 
@@ -98,7 +142,7 @@ GitHub allows 5,000 API calls/hour. Borg monitors usage and adapts:
 
 ```bash
 uv sync                    # install dependencies
-uv run pytest -v           # run tests
+uv run pytest -v           # run tests (59 tests)
 uv run borg                # launch TUI
 ```
 
