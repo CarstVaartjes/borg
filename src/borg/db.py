@@ -349,7 +349,12 @@ class Database:
         Returns:
             Tuple of (where_clause, params_tuple).
         """
-        merge_filter = "message NOT LIKE 'Merge %'"
+        merge_filter = (
+            "message NOT LIKE 'Merge %' "
+            "AND message NOT LIKE 'Revert %' "
+            "AND message NOT LIKE 'Resolve conflict%' "
+            "AND message NOT LIKE '%merge conflict%'"
+        )
         if org is None:
             return (merge_filter, ())
         return (f"org = ? AND {merge_filter}", (org,))
