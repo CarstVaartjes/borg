@@ -9,8 +9,9 @@ from io import BytesIO
 
 import httpx
 
-# ASCII brightness ramp (bright to dark — inverted for typical light-bg photos)
-_ASCII_CHARS = "@%#*+=-:. "
+# Grayscale thresholds for half-block rendering
+_DARK = 100   # below = dark
+_LIGHT = 155  # above = light
 
 
 def _get_gh_token() -> str | None:
@@ -55,7 +56,7 @@ def fetch_avatar_url(emails: tuple[str, ...]) -> str | None:
                 if resp.status_code == 200:
                     avatar_url = resp.json().get("avatar_url")
                     if avatar_url:
-                        return avatar_url + "&s=128"
+                        return avatar_url + "&s=256"
             except Exception:
                 pass
 
@@ -74,7 +75,7 @@ def fetch_avatar_url(emails: tuple[str, ...]) -> str | None:
                     if items:
                         avatar_url = items[0].get("avatar_url")
                         if avatar_url:
-                            return avatar_url + "&s=128"
+                            return avatar_url + "&s=256"
             except Exception:
                 pass
 
@@ -89,15 +90,18 @@ def fetch_avatar_url(emails: tuple[str, ...]) -> str | None:
 
 @lru_cache(maxsize=64)
 def image_to_ascii(url: str, width: int = 30, height: int = 15) -> str:
-    """Download an image and convert to ASCII art.
+    """Download an image and convert to half-block art.
+
+    Uses Unicode half-block characters (▀▄█ ) to pack 2 vertical pixels
+    per character cell, doubling the effective vertical resolution.
 
     Args:
         url: Image URL to download.
-        width: ASCII art width in characters.
-        height: ASCII art height in lines.
+        width: Art width in characters.
+        height: Art height in character rows (each row = 2 pixels).
 
     Returns:
-        Multi-line ASCII art string.
+        Multi-line string.
     """
     try:
         resp = httpx.get(url, timeout=5.0)
@@ -107,24 +111,47 @@ def image_to_ascii(url: str, width: int = 30, height: int = 15) -> str:
         return _name_art("?")
 
     try:
-        # Try PIL if available (best quality)
         from PIL import Image
 
         img = Image.open(BytesIO(image_bytes)).convert("L")
-        img = img.resize((width, height))
+        # Double the pixel height since we pack 2 rows per character
+        pixel_h = height * 2
+        img = img.resize((width, pixel_h))
         pixels = list(img.getdata())
 
+        def px(row: int, col: int) -> int:
+            if row >= pixel_h:
+                return 255  # treat out-of-bounds as white
+            return pixels[row * width + col]
+
         lines = []
-        for row in range(height):
+        for row in range(0, pixel_h, 2):
             line = ""
             for col in range(width):
-                pixel = pixels[row * width + col]
-                char_idx = pixel * (len(_ASCII_CHARS) - 1) // 255
-                line += _ASCII_CHARS[char_idx]
+                top = px(row, col)
+                bot = px(row + 1, col)
+                top_dark = top < _DARK
+                bot_dark = bot < _DARK
+                top_light = top > _LIGHT
+                bot_light = bot > _LIGHT
+
+                if top_dark and bot_dark:
+                    line += "█"
+                elif top_dark and not bot_dark:
+                    line += "▀"
+                elif not top_dark and bot_dark:
+                    line += "▄"
+                elif top_light and bot_light:
+                    line += " "
+                elif top < bot:
+                    line += "▀"
+                elif top > bot:
+                    line += "▄"
+                else:
+                    line += "░"
             lines.append(line)
         return "\n".join(lines)
     except ImportError:
-        # No PIL — return a simple placeholder
         return _name_art("SKYNET\nEMPLOYEE")
 
 
