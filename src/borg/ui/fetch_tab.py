@@ -59,7 +59,7 @@ class FetchTab(Static):
         log.write(
             f"[bold green]Detection complete: {result['high']} high, "
             f"{result['medium']} medium, {result['low']} low, "
-            f"{result['total']} total[/bold green]"
+            f"{result['total']} total ({result['authors']} unique authors)[/bold green]"
         )
         self.query_one("#fetch-btn", Button).disabled = False
         self.query_one("#detect-btn", Button).disabled = False

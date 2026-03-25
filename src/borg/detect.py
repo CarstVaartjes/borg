@@ -158,4 +158,10 @@ def detect_ai(db: Database) -> dict[str, int]:
         conn.execute("ROLLBACK")
         raise
 
-    return {"high": high, "medium": medium, "low": low, "total": high + medium + low}
+    # Rebuild author identity mapping (transitive merge by name + email)
+    num_authors = db.rebuild_author_identities()
+
+    return {
+        "high": high, "medium": medium, "low": low,
+        "total": high + medium + low, "authors": num_authors,
+    }

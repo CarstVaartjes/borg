@@ -79,6 +79,114 @@ class Database:
         """Return current UTC timestamp as ISO string."""
         return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    def resolve_author_identities(self) -> dict[str, str]:
+        """Resolve author identities by transitively merging by name and email.
+
+        If two emails share a name, they're the same person. If two names share
+        an email, they're the same person. This is applied recursively until
+        stable. Returns a mapping of email → canonical display name (the most
+        frequently used name in the group).
+        """
+        # Get all unique (author, email) pairs with counts
+        rows = self.conn.execute(
+            "SELECT author, email, COUNT(*) as cnt FROM commits GROUP BY author, email"
+        ).fetchall()
+
+        # Union-Find
+        parent: dict[str, str] = {}
+
+        def find(x: str) -> str:
+            while parent.get(x, x) != x:
+                parent[x] = parent.get(parent[x], parent[x])
+                x = parent[x]
+            return x
+
+        def union(a: str, b: str) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        # Collect all emails and names
+        all_keys: set[str] = set()
+        name_to_emails: dict[str, list[str]] = {}
+        email_to_names: dict[str, list[str]] = {}
+
+        for r in rows:
+            name, email = r["author"], r["email"]
+            key_name = f"name:{name}"
+            key_email = f"email:{email}"
+            all_keys.add(key_name)
+            all_keys.add(key_email)
+            # Same name → merge their emails
+            name_to_emails.setdefault(name, []).append(email)
+            # Same email → merge their names
+            email_to_names.setdefault(email, []).append(name)
+            # Union the name and email nodes
+            union(key_name, key_email)
+
+        # Now, for each name with multiple emails, union those emails
+        for name, emails in name_to_emails.items():
+            for email in emails[1:]:
+                union(f"email:{emails[0]}", f"email:{email}")
+
+        # For each email with multiple names, union those names
+        for email, names in email_to_names.items():
+            for name in names[1:]:
+                union(f"name:{names[0]}", f"name:{name}")
+
+        # Group emails by their root
+        groups: dict[str, list[str]] = {}
+        for r in rows:
+            email = r["email"]
+            root = find(f"email:{email}")
+            groups.setdefault(root, []).append(email)
+
+        # Deduplicate emails per group
+        unique_groups: dict[str, set[str]] = {}
+        for root, emails in groups.items():
+            unique_groups.setdefault(root, set()).update(emails)
+
+        # For each group, find the most common display name
+        email_to_canonical: dict[str, str] = {}
+        for root, emails in unique_groups.items():
+            # Count name usage across all emails in the group
+            name_counts: dict[str, int] = {}
+            for r in rows:
+                if r["email"] in emails:
+                    name_counts[r["author"]] = name_counts.get(r["author"], 0) + r["cnt"]
+            # Pick the most common name
+            canonical = max(name_counts, key=lambda n: name_counts[n]) if name_counts else "unknown"
+            for email in emails:
+                email_to_canonical[email] = canonical
+
+        return email_to_canonical
+
+    def _populate_author_identity_table(self, identity_map: dict[str, str]) -> None:
+        """Populate the _author_identity table with resolved identities.
+
+        Creates or replaces the table with email → canonical_name mapping.
+        """
+        self.conn.execute("DROP TABLE IF EXISTS _author_identity")
+        self.conn.execute(
+            "CREATE TABLE _author_identity (email TEXT PRIMARY KEY, canonical_name TEXT NOT NULL)"
+        )
+        self.conn.executemany(
+            "INSERT INTO _author_identity (email, canonical_name) VALUES (?, ?)",
+            list(identity_map.items()),
+        )
+        self.conn.commit()
+
+    def rebuild_author_identities(self) -> int:
+        """Resolve and store author identity mapping.
+
+        Call this after detection or when new commits are added.
+        Returns the number of identity groups found.
+        """
+        identity_map = self.resolve_author_identities()
+        self._populate_author_identity_table(identity_map)
+        unique_names = len(set(identity_map.values()))
+        return unique_names
+
     @staticmethod
     def _org_filter(org: str | None) -> tuple[str, tuple[str, ...] | tuple[()]]:
         """Build a WHERE clause fragment for optional org filtering.
@@ -283,18 +391,27 @@ class Database:
         where, params = self._org_filter(org)
         direction = "ASC" if ascending else "DESC"
 
-        # For authors, group by email to merge aliases (different display names,
-        # same email). Pick the most frequently used name as display name.
         if group_by == "author":
-            group_col = "email"
-            # Subquery to pick the most common author name per email
-            name_expr = (
-                "(SELECT c2.author FROM commits c2 WHERE c2.email = commits.email "
-                "GROUP BY c2.author ORDER BY COUNT(*) DESC LIMIT 1) AS author"
-            )
+            # Use the pre-computed _author_identity table from detection step.
+            # Falls back to email grouping if table doesn't exist yet.
+            try:
+                self.conn.execute("SELECT 1 FROM _author_identity LIMIT 1")
+                has_identity = True
+            except Exception:
+                has_identity = False
+
+            if has_identity:
+                name_expr = "COALESCE(aid.canonical_name, commits.author) AS author"
+                from_clause = "FROM commits LEFT JOIN _author_identity aid ON commits.email = aid.email"
+                group_col = "COALESCE(aid.canonical_name, commits.author)"
+            else:
+                name_expr = "commits.author AS author"
+                from_clause = "FROM commits"
+                group_col = "commits.email"
         else:
-            group_col = group_by
             name_expr = group_by
+            from_clause = "FROM commits"
+            group_col = group_by
 
         rows = self.conn.execute(
             f"""
@@ -304,7 +421,7 @@ class Database:
                 SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN 1 ELSE 0 END) AS ai_commits,
                 COALESCE(SUM(additions), 0) AS total_loc,
                 COALESCE(SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN additions ELSE 0 END), 0) AS ai_loc
-            FROM commits
+            {from_clause}
             WHERE {where}
             GROUP BY {group_col}
             HAVING COUNT(*) >= ?
@@ -362,17 +479,26 @@ class Database:
             Dict with author and ai_commits, or None.
         """
         where, params = self._org_filter(org)
+        try:
+            self.conn.execute("SELECT 1 FROM _author_identity LIMIT 1")
+            name_expr = "COALESCE(aid.canonical_name, commits.author)"
+            join = "LEFT JOIN _author_identity aid ON commits.email = aid.email"
+            group = "COALESCE(aid.canonical_name, commits.author)"
+        except Exception:
+            name_expr = "commits.author"
+            join = ""
+            group = "commits.email"
+
         row = self.conn.execute(
             f"""
             SELECT
-                (SELECT c2.author FROM commits c2 WHERE c2.email = commits.email
-                 GROUP BY c2.author ORDER BY COUNT(*) DESC LIMIT 1) AS author,
+                {name_expr} AS author,
                 COUNT(*) AS ai_commits
-            FROM commits
+            FROM commits {join}
             WHERE ai_tool IS NOT NULL AND ai_tool != ''
               AND date >= date('now', '-7 days')
               AND {where}
-            GROUP BY email
+            GROUP BY {group}
             ORDER BY ai_commits DESC
             LIMIT 1
         """,
@@ -401,10 +527,16 @@ class Database:
         org_where, org_params = self._org_filter(org)
 
         if group_by == "author":
-            # Value is the display name — look up matching emails
-            filter_clause = (
-                "email IN (SELECT DISTINCT email FROM commits WHERE author = ?)"
-            )
+            # Value is the canonical name — look up all emails in the identity group
+            try:
+                self.conn.execute("SELECT 1 FROM _author_identity LIMIT 1")
+                filter_clause = (
+                    "email IN (SELECT email FROM _author_identity WHERE canonical_name = ?)"
+                )
+            except Exception:
+                filter_clause = (
+                    "email IN (SELECT DISTINCT email FROM commits WHERE author = ?)"
+                )
             filter_params = (value,)
         elif group_by == "repo":
             filter_clause = "repo = ?"
