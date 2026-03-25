@@ -136,6 +136,42 @@ def test_devin_bot_detected(tmp_db: Path) -> None:
     assert row["ai_tool"] == "devin"
 
 
+def test_claude_message_style_heuristic(tmp_db: Path) -> None:
+    """Detects Claude-style commit messages: summary + blank line + bullet points."""
+    db = Database(tmp_db)
+    msg = (
+        "AI-482: Split test infrastructure — shared tests use local source\n"
+        "\n"
+        "- DockerfileSharedTest: installs from local source (pip install -e)\n"
+        "- DockerfileTest: installs from CodeArtifact (PIP_INDEX_URL)\n"
+        "- Shared tests run first (no DB needed), then orchestrator tests"
+    )
+    _insert_commit(db, "style1", msg, additions=50, deletions=20)
+    detect_ai(db)
+    row = db.conn.execute("SELECT ai_tool, ai_confidence FROM commits WHERE sha = 'style1'").fetchone()
+    assert row["ai_tool"] == "claude"
+    assert row["ai_confidence"] == "medium"
+
+
+def test_claude_style_not_triggered_on_short_messages(tmp_db: Path) -> None:
+    """Short messages with bullets should not trigger the heuristic."""
+    db = Database(tmp_db)
+    _insert_commit(db, "short1", "fix\n\n- item1\n- item2", additions=5, deletions=2)
+    detect_ai(db)
+    row = db.conn.execute("SELECT ai_tool FROM commits WHERE sha = 'short1'").fetchone()
+    assert row["ai_tool"] is None
+
+
+def test_claude_style_not_triggered_without_blank_line(tmp_db: Path) -> None:
+    """Bullets without a blank line separator should not match."""
+    db = Database(tmp_db)
+    msg = "Some title that is long enough to pass the length check for this heuristic rule\n- item1\n- item2"
+    _insert_commit(db, "noblanc", msg, additions=50, deletions=20)
+    detect_ai(db)
+    row = db.conn.execute("SELECT ai_tool FROM commits WHERE sha = 'noblanc'").fetchone()
+    assert row["ai_tool"] is None
+
+
 def test_detect_returns_counts(tmp_db: Path) -> None:
     """detect_ai returns correct count summary."""
     db = Database(tmp_db)
@@ -145,5 +181,6 @@ def test_detect_returns_counts(tmp_db: Path) -> None:
     _insert_commit(db, "j4", "normal", additions=10, deletions=10)
     result = detect_ai(db)
     assert result["high"] == 2
+    assert result["medium"] == 0
     assert result["low"] == 1
     assert result["total"] == 3

@@ -104,6 +104,17 @@ def detect_ai(db: Database) -> dict[str, int]:
                 (tool, confidence),
             )
 
+        # Claude message style heuristic: summary line + blank line + 2 or more
+        # bullet points starting with "- ". This is a very common Claude commit
+        # message pattern even without the Co-Authored-By trailer.
+        # The char(10) is \n in SQLite.
+        conn.execute(
+            "UPDATE commits SET ai_tool = 'claude', ai_confidence = 'medium' "
+            "WHERE ai_tool IS NULL "
+            "AND message LIKE '%' || char(10) || char(10) || '- %' || char(10) || '- %' "
+            "AND length(message) > 80"
+        )
+
         # Bulk heuristic: large additions with few deletions.
         conn.execute(
             "UPDATE commits SET ai_tool = 'unknown', ai_confidence = 'low' "
@@ -115,6 +126,9 @@ def detect_ai(db: Database) -> dict[str, int]:
         high = conn.execute(
             "SELECT COUNT(*) AS c FROM commits WHERE ai_confidence = 'high'"
         ).fetchone()["c"]
+        medium = conn.execute(
+            "SELECT COUNT(*) AS c FROM commits WHERE ai_confidence = 'medium'"
+        ).fetchone()["c"]
         low = conn.execute(
             "SELECT COUNT(*) AS c FROM commits WHERE ai_confidence = 'low'"
         ).fetchone()["c"]
@@ -124,4 +138,4 @@ def detect_ai(db: Database) -> dict[str, int]:
         conn.execute("ROLLBACK")
         raise
 
-    return {"high": high, "low": low, "total": high + low}
+    return {"high": high, "medium": medium, "low": low, "total": high + medium + low}

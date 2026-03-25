@@ -58,7 +58,8 @@ class FetchTab(Static):
         result = detect_ai(self.db)
         log.write(
             f"[bold green]Detection complete: {result['high']} high, "
-            f"{result['low']} low, {result['total']} total[/bold green]"
+            f"{result['medium']} medium, {result['low']} low, "
+            f"{result['total']} total[/bold green]"
         )
         self.query_one("#fetch-btn", Button).disabled = False
         self.query_one("#detect-btn", Button).disabled = False
