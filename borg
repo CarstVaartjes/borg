@@ -223,7 +223,7 @@ case "$COMMAND" in
         detect_ai "$DB"
         ;;
     report)
-        report_show "$DB" "$ORG" "" "$TOP"
+        report_show "$DB" "$ORG" "$TOP"
         ;;
     export)
         if [[ -z "$CSV" ]]; then
