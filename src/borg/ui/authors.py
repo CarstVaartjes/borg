@@ -123,20 +123,22 @@ class AuthorsTab(Static):
         )
 
         day_chart = self._bar_chart(
-            "Day", ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"],
+            "Day", ["M", "T", "W", "T", "F", "S", "S"],
             [day_counts[1], day_counts[2], day_counts[3], day_counts[4],
              day_counts[5], day_counts[6], day_counts[0]],
-            bar_height=5,
+            bar_height=5, col_width=1,
         )
+        # Group hours into 3h blocks for compact display
+        hour_3h = [sum(hour_counts[i:i+3]) for i in range(0, 24, 3)]
         hour_chart = self._bar_chart(
             "Hour",
-            [str(h) for h in range(24)],
-            hour_counts,
-            bar_height=5,
+            ["0", "3", "6", "9", "12", "15", "18", "21"],
+            hour_3h,
+            bar_height=5, col_width=2,
         )
 
         stats = f"\n  Favourite repo: {fav}\n\n"
-        stats += self._side_by_side(day_chart, hour_chart, gap=3)
+        stats += self._side_by_side(day_chart, hour_chart, gap=2)
 
         self._set_avatar_text(title + "\n  Loading avatar...")
         self._fetch_avatar(title, stats, tuple(email_list))
@@ -156,29 +158,32 @@ class AuthorsTab(Static):
         return "\n".join(lines)
 
     @staticmethod
-    def _bar_chart(title: str, labels: list[str], values: list[int], bar_height: int = 8) -> str:
-        """Render a horizontal bar chart using vertical bars."""
+    def _bar_chart(
+        title: str, labels: list[str], values: list[int],
+        bar_height: int = 8, col_width: int = 1,
+    ) -> str:
+        """Render vertical bar chart. col_width controls bar + gap width."""
         max_val = max(values) or 1
-        total = sum(values) or 1
 
-        # Build columns: each column is bar_height chars tall
         columns: list[list[str]] = []
         for val in values:
             fill = val * bar_height // max_val
             col = [" "] * (bar_height - fill) + ["█"] * fill
             columns.append(col)
 
+        bar_char = "█" * col_width
+        space_char = " " * col_width
+
         lines = [f"  {title}:"]
         for row in range(bar_height):
             line = "  "
             for col in columns:
-                line += col[row] + " "
+                line += (bar_char if col[row] == "█" else space_char) + " "
             lines.append(line)
 
-        # Labels row
         label_line = "  "
         for label in labels:
-            label_line += label[:2].ljust(2)
+            label_line += label[:col_width + 1].ljust(col_width + 1)
         lines.append(label_line)
 
         return "\n".join(lines)
