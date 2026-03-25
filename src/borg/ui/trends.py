@@ -27,7 +27,7 @@ class TrendsTab(Static):
 
     def refresh_data(self, org: str | None = None, filters: QueryFilters | None = None) -> None:
         f = filters or QueryFilters(org=org)
-        self._render(f)
+        self._render_charts(f)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-weekly":
@@ -40,9 +40,9 @@ class TrendsTab(Static):
             self.query_one("#btn-weekly", Button).variant = "default"
         else:
             return
-        self._render(self.app.query_filters)
+        self._render_charts(self.app.query_filters)
 
-    def _render(self, f: QueryFilters) -> None:
+    def _render_charts(self, f: QueryFilters) -> None:
         data = self.db.query_trends(period=self._period, filters=f)
         label = "Weekly" if self._period == "weekly" else "Monthly"
 
