@@ -11,6 +11,7 @@ from borg.db import Database
 from borg.ui.authors import AuthorsTab
 from borg.ui.export_tab import ExportTab
 from borg.ui.fetch_tab import FetchTab
+from borg.ui.identity_tab import IdentityTab
 from borg.ui.orgs_tab import OrgsTab
 from borg.ui.overview import OverviewTab
 from borg.ui.repos import ReposTab
@@ -86,6 +87,34 @@ class BorgApp(App):
     #rules-table {
         max-height: 30%;
     }
+    /* Identity tab layout */
+    #identity-title {
+        text-style: bold;
+    }
+    #identity-help {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+    #identity-table {
+        height: 1fr;
+    }
+    #alias-form {
+        height: 3;
+        margin: 1 0;
+    }
+    #alias-form Input {
+        width: 1fr;
+    }
+    #alias-form Button {
+        width: auto;
+    }
+    #alias-actions {
+        height: 3;
+    }
+    #alias-actions Button {
+        width: auto;
+        margin: 0 1 0 0;
+    }
     """
 
     BINDINGS = [
@@ -95,7 +124,8 @@ class BorgApp(App):
         Binding("4", "show_tab('trends')", "Trends"),
         Binding("5", "show_tab('fetch')", "Fetch"),
         Binding("6", "show_tab('export')", "Export"),
-        Binding("7", "show_tab('orgs')", "Orgs"),
+        Binding("7", "show_tab('identity')", "Identity"),
+        Binding("8", "show_tab('orgs')", "Orgs"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -134,6 +164,8 @@ class BorgApp(App):
                 yield FetchTab(self.db)
             with TabPane("Export", id="export"):
                 yield ExportTab(self.db)
+            with TabPane("Identity", id="identity"):
+                yield IdentityTab(self.db)
             with TabPane("Orgs", id="orgs"):
                 yield OrgsTab(self.db)
         yield Footer()
@@ -181,6 +213,7 @@ class BorgApp(App):
             "trends": TrendsTab,
             "fetch": FetchTab,
             "export": ExportTab,
+            "identity": IdentityTab,
             "orgs": OrgsTab,
         }
         widget_class = tab_map.get(active_pane)

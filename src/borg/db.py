@@ -62,6 +62,11 @@ class Database:
                 PRIMARY KEY (org, repo)
             );
 
+            CREATE TABLE IF NOT EXISTS author_aliases (
+                email TEXT PRIMARY KEY,
+                canonical_name TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS sync_meta (
                 key TEXT PRIMARY KEY,
                 value TEXT
@@ -179,13 +184,94 @@ class Database:
     def rebuild_author_identities(self) -> int:
         """Resolve and store author identity mapping.
 
-        Call this after detection or when new commits are added.
-        Returns the number of identity groups found.
+        Merges automatic resolution (transitive by name+email) with manual
+        aliases from the author_aliases table. Manual aliases take precedence.
+
+        Returns the number of unique author identities.
         """
+        # Step 1: Automatic resolution
         identity_map = self.resolve_author_identities()
+
+        # Step 2: Apply manual aliases on top (these override automatic)
+        manual = self.conn.execute(
+            "SELECT email, canonical_name FROM author_aliases"
+        ).fetchall()
+        manual_names = {r["email"]: r["canonical_name"] for r in manual}
+
+        # For each manual alias, update that email AND all emails that were
+        # in the same auto-resolved group
+        for email, canonical in manual_names.items():
+            # Find the auto-resolved name for this email
+            auto_name = identity_map.get(email)
+            if auto_name:
+                # Override all emails that shared this auto name
+                for e, n in identity_map.items():
+                    if n == auto_name:
+                        identity_map[e] = canonical
+            identity_map[email] = canonical
+
         self._populate_author_identity_table(identity_map)
         unique_names = len(set(identity_map.values()))
         return unique_names
+
+    # --- Author alias management ---
+
+    def get_author_aliases(self) -> list[dict]:
+        """Get all manual author aliases.
+
+        Returns:
+            List of dicts with email and canonical_name.
+        """
+        rows = self.conn.execute(
+            "SELECT email, canonical_name FROM author_aliases ORDER BY canonical_name, email"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def set_author_alias(self, email: str, canonical_name: str) -> None:
+        """Set or update a manual author alias.
+
+        Args:
+            email: The email to alias.
+            canonical_name: The canonical display name.
+        """
+        self.conn.execute(
+            "INSERT OR REPLACE INTO author_aliases (email, canonical_name) VALUES (?, ?)",
+            (email, canonical_name),
+        )
+        self.conn.commit()
+
+    def remove_author_alias(self, email: str) -> None:
+        """Remove a manual author alias.
+
+        Args:
+            email: The email to remove the alias for.
+        """
+        self.conn.execute("DELETE FROM author_aliases WHERE email = ?", (email,))
+        self.conn.commit()
+
+    def get_identity_groups(self) -> list[dict]:
+        """Get the current author identity groups for display.
+
+        Returns a list of groups, each with canonical_name and list of emails.
+        Uses _author_identity if available, falls back to resolve.
+        """
+        try:
+            rows = self.conn.execute(
+                "SELECT email, canonical_name FROM _author_identity ORDER BY canonical_name, email"
+            ).fetchall()
+        except Exception:
+            identity_map = self.resolve_author_identities()
+            rows = [{"email": e, "canonical_name": n} for e, n in identity_map.items()]
+
+        from collections import defaultdict
+        groups: dict[str, list[str]] = defaultdict(list)
+        for r in rows:
+            groups[r["canonical_name"]].append(r["email"])
+
+        return [
+            {"canonical_name": name, "emails": sorted(emails)}
+            for name, emails in sorted(groups.items())
+        ]
 
     @staticmethod
     def _org_filter(org: str | None) -> tuple[str, tuple[str, ...] | tuple[()]]:
