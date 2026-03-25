@@ -385,7 +385,7 @@ class Database:
         group_by: str,
         value: str,
         org: str | None = None,
-        limit: int = 200,
+        limit: int = 5000,
     ) -> list[dict]:
         """Get individual commits for a specific author (by email) or repo.
 
