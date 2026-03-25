@@ -4,27 +4,28 @@
 
 Your GitHub org is being assimilated by AI coding tools. Borg tracks how fast.
 
-An interactive terminal dashboard that scans pull requests across your GitHub organizations, detects AI-assisted commits via `Co-Authored-By` trailers, and shows you who's using what — with charts, rankings, and trends.
+An interactive terminal dashboard that scans pull requests across your GitHub organizations, detects AI-assisted commits via `Co-Authored-By` trailers and message style heuristics, and shows you who's using what — with charts, rankings, and trends.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Borg — Resistance is futile                       [org: all ▾]    │
-├─────────────────────────────────────────────────────────────────────┤
-│ Overview │ Authors │ Repos │ Trends  ·  Fetch │ Detect │ Export │ Orgs │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  Assimilation Progress: 847 / 2,341 commits (36%)                  │
-│  LOC: 124,500 / 380,200 (33%)                                      │
-│                                                                     │
-│  ⭐ Skynet Employee of the Week: Alice Chen (42 AI commits)        │
-│                                                                     │
-│  claude   ████████████████████████  612                             │
-│  copilot  ██████████               189                              │
-│  cursor   ████                      46                              │
-│                                                                     │
-├─────────────────────────────────────────────────────────────────────┤
-│ 1-8: tabs  /: filter  q: quit              2,341 commits · 3 orgs  │
-└─────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Borg — Resistance is futile                                [org: all ▾]    │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Overview │ Authors │ Repos │ Trends  ·  Fetch │ Export │ Identity │ Orgs    │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Assimilation Progress                                                       │
+│    Commits: 881 / 7,020 (12.5%)                                             │
+│    LOC:     129,799 / 380,200 (34.1%)                                       │
+│                                                                              │
+│  ⭐ Skynet Employee of the Week: Alice Chen (42 AI commits)                 │
+│                                                                              │
+│  claude        ████████████████████████  612                                │
+│  ai-assisted   ██████████               189                                 │
+│  copilot       ████                      46                                 │
+│                                                                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ 1-8: tabs  /: filter  q: quit                       7,020 commits · 3 orgs │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Quick Start
@@ -39,23 +40,23 @@ uv run borg
 That's it. Everything happens in the TUI:
 
 1. **Orgs** tab → add your GitHub org
-2. **Fetch** tab → pull commit data from all PRs
+2. **Fetch** tab → pull commit data from all PRs + run detection
 3. **Overview** → see your assimilation progress
 
 ## Features
 
 | Tab | What it does |
 |-----|-------------|
-| **Overview** | Assimilation Progress, Skynet Employee of the Week, AI tool breakdown chart |
-| **Authors** | Who's using AI the most? Sortable by commits, LOC, percentage |
-| **Repos** | Which repos are most AI-assisted? Same drill |
+| **Overview** | Assimilation Progress (commits + LOC), Skynet Employee of the Week, tool chart |
+| **Authors** | Who's using AI the most? Sortable by commits, LOC, percentage — click a row for commit details |
+| **Repos** | Which repos are most AI-assisted? Same drill — click for details, Enter opens GitHub |
 | **Trends** | Monthly + weekly adoption curves (plotext charts in your terminal) |
-| **Fetch** | Pull fresh data with live progress: `PR 42/127: #36588 [merged] Fix auth (3 commits, 2 new)` |
-| **Detect** | See all 11 detection rules, re-run detection anytime |
+| **Fetch** | Fetch & Detect in one flow, or Re-run Detection Only. Live progress per PR. |
 | **Export** | Dump to CSV for spreadsheet warriors |
+| **Identity** | Author identity management — auto-resolved groups + manual aliases + fuzzy merge suggestions |
 | **Orgs** | Add/remove GitHub organizations |
 
-**Keys:** `1-8` switch tabs, `/` filters by org, `q` quits.
+**Keys:** `1-8` switch tabs, `/` filters by org, `q` quits. Click a row in Authors/Repos to see all commits; press Enter to open in browser.
 
 ## Why PR-Based Fetching?
 
@@ -74,37 +75,54 @@ Borg fetches:    abc123 ✓  def456 ✓  (trailers preserved)
 
 ## What It Detects
 
-| Tool | How | Confidence |
-|------|-----|------------|
-| Claude | `Co-Authored-By:.*Claude` or `noreply@anthropic.com` | high |
-| Copilot | `Co-Authored-By:.*Copilot` or `copilot[bot]` author | high |
-| Cursor | `Co-Authored-By:.*Cursor` or `noreply@cursor.com` | high |
-| Aider | `(aider)` in author name | high |
-| ChatGPT | `Co-Authored-By:.*ChatGPT` or `Co-Authored-By:.*OpenAI` | high |
-| Devin | `devin-ai[bot]` author/email | high |
-| Cody | `Co-Authored-By:.*Cody.*sourcegraph` | high |
-| Amazon Q | `Co-Authored-By:.*Amazon Q` | high |
-| Windsurf | `Co-Authored-By:.*Windsurf` | high |
-| Codeium | `Co-Authored-By:.*Codeium` | high |
-| Tabnine | `Co-Authored-By:.*Tabnine` | high |
+### High Confidence — Trailer-based
+
+| Tool | How |
+|------|-----|
+| Claude | `Co-Authored-By:.*Claude` or `noreply@anthropic.com` |
+| Copilot | `Co-Authored-By:.*Copilot` or `copilot[bot]` author |
+| Cursor | `Co-Authored-By:.*Cursor` or `noreply@cursor.com` |
+| Aider | `(aider)` in author name |
+| ChatGPT | `Co-Authored-By:.*ChatGPT` or `Co-Authored-By:.*OpenAI` |
+| Devin | `devin-ai[bot]` author/email |
+| Cody | `Co-Authored-By:.*Cody.*sourcegraph` |
+| Amazon Q | `Co-Authored-By:.*Amazon Q` |
+| Windsurf | `Co-Authored-By:.*Windsurf` |
+| Codeium | `Co-Authored-By:.*Codeium` |
+| Tabnine | `Co-Authored-By:.*Tabnine` |
+
+### Medium Confidence — Message style heuristic
+
+Structured commit messages: summary line + blank line + substantive body (bullet points or prose, >100 chars). This is the signature Claude/AI style even when trailers are missing.
+
+### Low Confidence — Prefix heuristics
+
+- **Conventional commits:** `fix:`, `feat:`, `chore:`, `refactor:`, `docs:`, `test:`, `ci:`, `perf:`, `style:`, `build:` — single-line, 15-120 chars
+- **Jira ticket prefix:** `PROJ-123: Sentence description` — requires colon separator
+- **Bulk addition:** `additions > 100 AND deletions < 10`
 
 Detection runs locally in a single SQLite transaction — no API calls, instant, re-runnable.
 
 ## Smart Details
 
-**Author grouping by email** — `ctselas7` and `Christos Tselas` with the same email? Same person. Borg groups by email and shows the most common display name.
+**Author identity resolution** — Borg uses a union-find algorithm to transitively merge authors by shared names and emails. `ctselas7` and `Christos Tselas` with the same email? Same person. `alvin` using `lvindotexe@github.com` and `alvin van dijk` using `alvinv@office.local`? Add a manual alias in the Identity tab, and all 8 emails merge into one identity. Fuzzy suggestions auto-detect likely merges (substring/shared-word matching).
 
-**Production tracking** — each commit tracks whether its PR was merged to `main`/`master` (`in_production` flag). Commits flow through feature → uat → preprod → main; the flag promotes to `1` when the main-targeting PR is processed.
+**Noise filtering** — Merge commits, reverts, and conflict resolutions are automatically excluded from all statistics. These are GitHub-generated artifacts without meaningful authorship.
 
-**All PR states** — merged, open, and abandoned PRs are all included. This tracks development effort, not just what shipped.
+**Production tracking** — Each commit has an `in_production` flag tracking whether its PR was merged to `main`/`master`. Commits flow through feature → uat → preprod → main; the flag promotes to `1` when the main-targeting PR is processed.
 
-**Rate limiting** — GitHub gives you 5,000 API calls/hour. Borg monitors usage and adapts parallelism (8→4→wait). A fetch always runs to completion.
+**All PR states** — Merged, open, and abandoned PRs are all included. This tracks development effort, not just what shipped.
+
+**Incremental fetching** — Only PRs updated since the last fetch are processed. Second fetch is fast.
+
+**Rate limiting** — GitHub gives you 5,000 API calls/hour. Borg monitors usage and adapts parallelism (8→4→wait). Stops enrichment gracefully when rate limit is hit; picks up where it left off next time.
 
 ## Known Limitations
 
-- **No trailer = no detection.** If someone uses Claude but commits without `Co-Authored-By`, borg can't see it.
-- **Squash SHAs are new.** The original PR commits never appear on main, so `in_production` is based on PR target branch, not commit presence on main.
-- **PR commits API has no `since` filter.** Long-lived PRs may include some older commits before the floor date.
+- **No trailer = high-confidence detection impossible.** The medium/low heuristics catch many cases, but false positives are possible.
+- **Squash SHAs are new.** The original PR commits never appear on main, so `in_production` is based on PR target branch.
+- **PR commits API has no `since` filter.** Commits before the org's floor date are filtered at insert time.
+- **Author fuzzy matching has false positives.** "Jose Jimenez" and "Jose Romero" share "Jose" but are different people. Review suggestions before applying.
 
 ## Requirements
 
@@ -118,7 +136,7 @@ Detection runs locally in a single SQLite transaction — no API calls, instant,
 
 ```bash
 uv sync                                      # install deps
-uv run pytest -v                             # 89 tests
+uv run pytest -v                             # 99 tests
 uv run python tests/create_fixture.py        # regenerate test fixture DB
 uv run borg                                  # launch TUI
 ```
