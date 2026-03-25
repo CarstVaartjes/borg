@@ -174,10 +174,12 @@ class AuthorsTab(Static):
 
         counts: dict[str, int] = {}
         for msg in messages:
-            # Extract words, skip Jira tickets (PROJ-123)
-            words = re.findall(r"[a-z]{3,}", msg.lower())
+            # Remove Jira tickets (PROJ-123) and URLs before extracting words
+            cleaned = re.sub(r"[A-Z]{2,}-\d+", "", msg)
+            cleaned = re.sub(r"https?://\S+", "", cleaned)
+            words = re.findall(r"[a-z]{3,}", cleaned.lower())
             for word in words:
-                if word not in stop_words and not word.startswith("http"):
+                if word not in stop_words:
                     counts[word] = counts.get(word, 0) + 1
 
         if not counts:

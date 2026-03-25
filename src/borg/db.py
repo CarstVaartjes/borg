@@ -142,7 +142,7 @@ class Database:
             # Union the name and email nodes
             union(key_name, key_email)
 
-        # Now, for each name with multiple emails, union those emails
+        # For each name with multiple emails, union those emails
         for name, emails in name_to_emails.items():
             for email in emails[1:]:
                 union(f"email:{emails[0]}", f"email:{email}")
@@ -151,6 +151,31 @@ class Database:
         for email, names in email_to_names.items():
             for name in names[1:]:
                 union(f"name:{names[0]}", f"name:{name}")
+
+        # Username heuristic: extract username from emails and merge when
+        # the same username appears in multiple emails. E.g.:
+        #   aajorlou@company.com  →  username "aajorlou"
+        #   12345+aajorlou@users.noreply.github.com  →  username "aajorlou"
+        import re
+        username_to_emails: dict[str, list[str]] = {}
+        all_emails = list(email_to_names.keys())
+        for email in all_emails:
+            # Extract username: before @ or after + in noreply
+            noreply = re.match(r"\d+\+(.+)@users\.noreply\.github\.com", email)
+            if noreply:
+                uname = noreply.group(1).lower()
+            elif "@" in email:
+                uname = email.split("@")[0].lower()
+            else:
+                continue
+            # Skip very short usernames (likely initials)
+            if len(uname) >= 4:
+                username_to_emails.setdefault(uname, []).append(email)
+
+        for uname, emails in username_to_emails.items():
+            if len(emails) > 1:
+                for email in emails[1:]:
+                    union(f"email:{emails[0]}", f"email:{email}")
 
         # Group emails by their root
         groups: dict[str, list[str]] = {}
