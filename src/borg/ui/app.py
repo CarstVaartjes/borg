@@ -9,7 +9,6 @@ from textual.widgets import Footer, Header, Label, Select, TabbedContent, TabPan
 
 from borg.db import Database
 from borg.ui.authors import AuthorsTab
-from borg.ui.detect_tab import DetectTab
 from borg.ui.export_tab import ExportTab
 from borg.ui.fetch_tab import FetchTab
 from borg.ui.orgs_tab import OrgsTab
@@ -68,6 +67,25 @@ class BorgApp(App):
         height: auto;
         color: $text-muted;
     }
+    /* Fetch tab layout */
+    #fetch-buttons {
+        height: 3;
+        margin: 0 0 1 0;
+    }
+    #fetch-buttons Button {
+        width: auto;
+        margin: 0 1 0 0;
+    }
+    #fetch-log {
+        height: 1fr;
+    }
+    #rules-title {
+        margin: 1 0 0 0;
+        text-style: bold;
+    }
+    #rules-table {
+        max-height: 30%;
+    }
     """
 
     BINDINGS = [
@@ -76,9 +94,8 @@ class BorgApp(App):
         Binding("3", "show_tab('repos')", "Repos"),
         Binding("4", "show_tab('trends')", "Trends"),
         Binding("5", "show_tab('fetch')", "Fetch"),
-        Binding("6", "show_tab('detect')", "Detect"),
-        Binding("7", "show_tab('export')", "Export"),
-        Binding("8", "show_tab('orgs')", "Orgs"),
+        Binding("6", "show_tab('export')", "Export"),
+        Binding("7", "show_tab('orgs')", "Orgs"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -115,8 +132,6 @@ class BorgApp(App):
                 yield TrendsTab(self.db)
             with TabPane("Fetch", id="fetch"):
                 yield FetchTab(self.db)
-            with TabPane("Detect", id="detect"):
-                yield DetectTab(self.db)
             with TabPane("Export", id="export"):
                 yield ExportTab(self.db)
             with TabPane("Orgs", id="orgs"):
@@ -165,7 +180,6 @@ class BorgApp(App):
             "repos": ReposTab,
             "trends": TrendsTab,
             "fetch": FetchTab,
-            "detect": DetectTab,
             "export": ExportTab,
             "orgs": OrgsTab,
         }
