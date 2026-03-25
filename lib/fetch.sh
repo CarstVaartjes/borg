@@ -11,7 +11,7 @@ sql_escape() {
 
 check_rate_limit() {
     local info
-    info=$(gh api rate_limit --jq '.rate | "\(.remaining) \(.reset)"' 2>/dev/null) || echo "5000 0"
+    info=$(gh api rate_limit --jq '.rate | "\(.remaining) \(.reset)"' 2>/dev/null) || info="5000 0"
     echo "$info"
 }
 
@@ -104,12 +104,10 @@ fetch_repo_commits() {
             local fetched_at
             fetched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-            sqlite3 "$db" "INSERT OR IGNORE INTO commits (sha, repo, author, email, date, message, fetched_at)
-                VALUES ('$sha', '$e_repo', '$e_author', '$e_email', '$date', '$e_message', '$fetched_at');"
-
-            # Track if this was actually inserted (rowcount via changes())
             local changes
-            changes=$(sqlite3 "$db" "SELECT changes();")
+            changes=$(sqlite3 "$db" "INSERT OR IGNORE INTO commits (sha, repo, author, email, date, message, fetched_at)
+                VALUES ('$sha', '$e_repo', '$e_author', '$e_email', '$date', '$e_message', '$fetched_at');
+                SELECT changes();")
             if [[ "$changes" -gt 0 ]]; then
                 new_count=$((new_count + 1))
             fi
