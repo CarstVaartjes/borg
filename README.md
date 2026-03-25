@@ -4,6 +4,8 @@
 
 Your GitHub org is being assimilated by AI coding tools. Borg tracks how fast.
 
+> **Disclaimer:** This tool is meant as a fun way to track adoption of vibecoding across teams and repositories — not as a performance metric. Lines of code and commit counts are terrible proxies for productivity and should never be used for performance evaluations or comparisons between individuals. AI-assisted tooling can also inflate these numbers with slop. Don't turn this into a competition. Use it to understand adoption patterns, spark conversations, and have fun with the Skynet theme.
+
 An interactive terminal dashboard that scans pull requests across your GitHub organizations, detects AI-assisted commits via `Co-Authored-By` trailers and message style heuristics, and shows you who's using what — with charts, rankings, and trends.
 
 <p align="center">
