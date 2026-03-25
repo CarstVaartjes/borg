@@ -355,6 +355,12 @@ class GitHubFetcher:
                 is_production = bool(merged_at) and base_branch in ("main", "master")
 
                 # Fetch individual commits for this PR
+                pr_title = pr.get("title", "")[:50]
+                self._emit(FetchProgress(
+                    phase="commits", org=org, repo=repo,
+                    current=inserted,
+                    message=f"  PR #{pr['number']} [{pr_state_val}] {pr_title} ({inserted} new)",
+                ))
                 pr_url = f"{BASE_URL}/repos/{org}/{repo}/pulls/{pr['number']}/commits?per_page=100"
                 pr_inserted, pr_commit_date = await self._fetch_paginated_commits(
                     pr_url, org, repo,
