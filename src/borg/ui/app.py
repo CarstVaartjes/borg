@@ -91,6 +91,14 @@ class BorgApp(App):
     #rules-table {
         max-height: 30%;
     }
+    /* Trends tab */
+    #trend-toggle {
+        height: 3;
+    }
+    #trend-toggle Button {
+        width: auto;
+        margin: 0 1 0 0;
+    }
     /* Identity tab layout */
     #identity-title {
         text-style: bold;
