@@ -368,3 +368,56 @@ class TestCommitInsertion:
         assert db.get_repo_commit_count("acme-corp", "repo1") == 0
         db.update_repo_sync("acme-corp", "repo1", "2024-03-01", 15)
         assert db.get_repo_commit_count("acme-corp", "repo1") == 15
+
+
+class TestInProductionPromotion:
+    """Test that in_production gets promoted on duplicate insert."""
+
+    def test_duplicate_insert_promotes_in_production(self, tmp_db: Path) -> None:
+        """When a commit already exists with in_production=0, a duplicate insert
+        with in_production=True should promote it to 1."""
+        db = Database(tmp_db)
+        db.org_add("acme-corp", "2024-01-01")
+
+        # Insert commit with in_production=False
+        result1 = db.insert_commit(
+            "sha1", "acme-corp", "repo1", "Alice", "a@x.com", "2024-03-01", "msg",
+            in_production=False,
+        )
+        assert result1 is True
+
+        # Insert same SHA again with in_production=True (returns False = dup)
+        result2 = db.insert_commit(
+            "sha1", "acme-corp", "repo1", "Alice", "a@x.com", "2024-03-01", "msg",
+            in_production=True,
+        )
+        assert result2 is False
+
+        # Verify: in_production is now 1
+        row = db.conn.execute(
+            "SELECT in_production FROM commits WHERE sha = 'sha1'"
+        ).fetchone()
+        assert row["in_production"] == 1
+
+    def test_duplicate_insert_without_production_does_not_change(self, tmp_db: Path) -> None:
+        """Duplicate insert without in_production should not change existing value."""
+        db = Database(tmp_db)
+        db.org_add("acme-corp", "2024-01-01")
+
+        # Insert commit with in_production=False
+        db.insert_commit(
+            "sha1", "acme-corp", "repo1", "Alice", "a@x.com", "2024-03-01", "msg",
+            in_production=False,
+        )
+
+        # Insert same SHA again with in_production=False
+        db.insert_commit(
+            "sha1", "acme-corp", "repo1", "Alice", "a@x.com", "2024-03-01", "msg",
+            in_production=False,
+        )
+
+        # Verify: in_production still 0
+        row = db.conn.execute(
+            "SELECT in_production FROM commits WHERE sha = 'sha1'"
+        ).fetchone()
+        assert row["in_production"] == 0

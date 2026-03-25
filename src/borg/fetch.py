@@ -441,8 +441,12 @@ class GitHubFetcher:
             org_filter: If set, only fetch for this organization.
         """
         orgs = self._db.org_get_all()
+        if not orgs:
+            raise ValueError("No orgs registered — add one with 'borg org add'")
         if org_filter:
             orgs = [o for o in orgs if o["name"] == org_filter]
+            if not orgs:
+                raise ValueError(f"Org '{org_filter}' not found")
 
         for org_row in orgs:
             org = org_row["name"]
