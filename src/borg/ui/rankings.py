@@ -10,10 +10,10 @@ from borg.ui.commit_modal import CommitDetailModal
 _COLUMN_MAP = {
     "AI": "ai_commits",
     "Total": "total_commits",
-    "%": "ai_commits",
+    "%": "ai_commit_pct",
     "AI LOC": "ai_loc",
     "Total LOC": "total_loc",
-    "LOC %": "ai_loc",
+    "LOC %": "ai_loc_pct",
 }
 
 

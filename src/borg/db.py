@@ -598,8 +598,19 @@ class Database:
         """Get rankings by author or repo."""
         if group_by not in ("author", "repo"):
             raise ValueError(f"Invalid group_by: {group_by}")
-        if order_by not in ("ai_commits", "total_commits", "ai_loc", "total_loc"):
+        valid_orders = {
+            "ai_commits", "total_commits", "ai_loc", "total_loc",
+            "ai_commit_pct", "ai_loc_pct",
+        }
+        if order_by not in valid_orders:
             raise ValueError(f"Invalid order_by: {order_by}")
+
+        # Map percentage sorts to SQL expressions
+        order_expr_map = {
+            "ai_commit_pct": "CAST(ai_commits AS REAL) / MAX(total_commits, 1)",
+            "ai_loc_pct": "CAST(ai_loc AS REAL) / MAX(total_loc, 1)",
+        }
+        order_sql = order_expr_map.get(order_by, order_by)
 
         f = filters or QueryFilters(org=org)
         where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author, month=f.month, week=f.week)
@@ -640,7 +651,7 @@ class Database:
             WHERE {where}
             GROUP BY {group_col}
             HAVING COUNT(*) >= ?
-            ORDER BY {order_by} {direction}
+            ORDER BY {order_sql} {direction}
             LIMIT ?
         """,
             (*params, min_commits, limit),
