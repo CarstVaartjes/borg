@@ -340,15 +340,19 @@ class Database:
     def _org_filter(org: str | None) -> tuple[str, tuple[str, ...] | tuple[()]]:
         """Build a WHERE clause fragment for optional org filtering.
 
+        Always excludes merge commits (they're GitHub-generated artifacts
+        without meaningful authorship or AI trailers).
+
         Args:
             org: Org name to filter by, or None for all orgs.
 
         Returns:
             Tuple of (where_clause, params_tuple).
         """
+        merge_filter = "message NOT LIKE 'Merge %'"
         if org is None:
-            return ("1=1", ())
-        return ("org = ?", (org,))
+            return (merge_filter, ())
+        return (f"org = ? AND {merge_filter}", (org,))
 
     # ── Org CRUD ──────────────────────────────────────────────────────
 
