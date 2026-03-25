@@ -238,6 +238,55 @@ report_trend() {
 }
 
 # ---------------------------------------------------------------------------
+# Weekly trend (ISO weeks)
+# ---------------------------------------------------------------------------
+
+report_weekly_trend() {
+    local db="$1"
+
+    local rows
+    rows=$(sqlite3 -separator '|' "$db" \
+        "SELECT strftime('%Y-W%W', date) as week,
+                COUNT(*) as total,
+                SUM(CASE WHEN ai_confidence = 'high' THEN 1 ELSE 0 END) as ai,
+                SUM(COALESCE(additions,0) + COALESCE(deletions,0)) as total_loc,
+                SUM(CASE WHEN ai_confidence = 'high' THEN COALESCE(additions,0) + COALESCE(deletions,0) ELSE 0 END) as ai_loc
+         FROM commits
+         GROUP BY week
+         ORDER BY week;")
+
+    [[ -z "$rows" ]] && return
+
+    section_header "Weekly trend (ISO weeks):"
+
+    local -a pcts=()
+
+    while IFS='|' read -r week total ai total_loc ai_loc; do
+        [[ -z "$week" ]] && continue
+        local commit_pct loc_pct
+        commit_pct=$(pct "$ai" "$total")
+        loc_pct=$(pct "$ai_loc" "$total_loc")
+        pcts+=("$commit_pct")
+
+        printf "  %s  %7s/%7s  %3s%%  |  %12s/%12s LOC  %3s%%\n" \
+            "$week" \
+            "$(format_number "$ai")" \
+            "$(format_number "$total")" \
+            "$commit_pct" \
+            "$(format_number "$ai_loc")" \
+            "$(format_number "$total_loc")" \
+            "$loc_pct"
+    done <<< "$rows"
+
+    # Sparkline
+    if [[ ${#pcts[@]} -gt 0 && -x "$SCRIPT_DIR/deps/spark" ]]; then
+        local sparkline
+        sparkline=$("$SCRIPT_DIR/deps/spark" "${pcts[@]}")
+        echo "  Trend: $sparkline"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -248,5 +297,6 @@ report_show() {
     report_authors "$db" "$top"
     report_repos "$db" "$top"
     report_trend "$db"
+    report_weekly_trend "$db"
     echo ""
 }
