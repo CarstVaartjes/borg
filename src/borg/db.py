@@ -380,6 +380,54 @@ class Database:
         ).fetchone()
         return dict(row) if row else None
 
+    def query_commits_by(
+        self,
+        group_by: str,
+        value: str,
+        org: str | None = None,
+        limit: int = 200,
+    ) -> list[dict]:
+        """Get individual commits for a specific author (by email) or repo.
+
+        Args:
+            group_by: "author" or "repo".
+            value: The author name or repo name to filter by.
+            org: Optional org filter.
+            limit: Max results.
+
+        Returns:
+            List of commit dicts with url, message excerpt, stats, ai info.
+        """
+        org_where, org_params = self._org_filter(org)
+
+        if group_by == "author":
+            # Value is the display name — look up matching emails
+            filter_clause = (
+                "email IN (SELECT DISTINCT email FROM commits WHERE author = ?)"
+            )
+            filter_params = (value,)
+        elif group_by == "repo":
+            filter_clause = "repo = ?"
+            filter_params = (value,)
+        else:
+            return []
+
+        rows = self.conn.execute(
+            f"""
+            SELECT sha, org, repo, author, email, date,
+                   COALESCE(additions, 0) as additions,
+                   COALESCE(deletions, 0) as deletions,
+                   substr(message, 1, 120) as message,
+                   ai_tool, pr_number
+            FROM commits
+            WHERE {org_where} AND {filter_clause}
+            ORDER BY date DESC
+            LIMIT ?
+            """,
+            (*org_params, *filter_params, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def export_csv(self, path: Path, org: str | None = None) -> int:
         """Export commits to a CSV file.
 

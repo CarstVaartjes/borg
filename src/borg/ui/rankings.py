@@ -4,6 +4,7 @@ from textual.app import ComposeResult
 from textual.widgets import DataTable, Static
 
 from borg.db import Database
+from borg.ui.commit_modal import CommitDetailModal
 
 # Map display column names to db query order_by values.
 _COLUMN_MAP = {
@@ -86,3 +87,17 @@ class RankingTab(Static):
             self._ascending = False
 
         self.refresh_data(org=self.app.org_filter)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Open commit detail modal when a row is clicked/entered."""
+        table = self.query_one("#ranking-table", DataTable)
+        row = table.get_row_at(event.cursor_row)
+        name = str(row[0])  # first column is the author/repo name
+        self.app.push_screen(
+            CommitDetailModal(
+                db=self.db,
+                group_by=self.group_by,
+                value=name,
+                org=self.app.org_filter,
+            )
+        )
