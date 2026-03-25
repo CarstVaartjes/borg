@@ -197,11 +197,34 @@ class GitHubFetcher:
 
         return repos
 
-    async def fetch_repo_commits(self, org: str, repo: str, since: str) -> int:
-        """Fetch commits for a repo since a given date.
+    async def fetch_branches(self, org: str, repo: str) -> list[str]:
+        """List all branch names for a repo.
 
-        Paginates through all commits, inserts new ones into the database,
-        and updates the repo_sync bookmark.
+        Args:
+            org: Organization name.
+            repo: Repository name.
+
+        Returns:
+            List of branch names.
+        """
+        branches: list[str] = []
+        url: str | None = f"{BASE_URL}/repos/{org}/{repo}/branches?per_page=100"
+
+        while url:
+            resp = await self._client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            branches.extend(b["name"] for b in data)
+            url = self._parse_next_url(resp.headers)
+
+        return branches
+
+    async def fetch_repo_commits(self, org: str, repo: str, since: str) -> int:
+        """Fetch commits for a repo across all branches since a given date.
+
+        Iterates over every branch to capture commits that may be lost
+        in squash merges on the default branch. INSERT OR IGNORE deduplicates
+        by SHA when the same commit appears on multiple branches.
 
         Args:
             org: Organization name.
@@ -215,44 +238,70 @@ class GitHubFetcher:
         bookmark = self._db.get_repo_bookmark(org, repo)
         since_date = bookmark or since
 
-        inserted = 0
-        newest_date: str | None = None
-        url = f"{BASE_URL}/repos/{org}/{repo}/commits?per_page=100&since={since_date}"
-
-        while url:
+        # Fetch all branches so we see commits before squash-merge
+        try:
+            branches = await self.fetch_branches(org, repo)
+        except Exception as e:
             self._emit(
                 FetchProgress(
-                    phase="commits",
-                    org=org,
-                    repo=repo,
-                    current=inserted,
-                    message=f"Fetching commits for {repo}",
+                    phase="commits", org=org, repo=repo,
+                    message=f"Warning: could not list branches for {repo}: {e}",
                 )
             )
-            resp = await self._client.get(url)
-            resp.raise_for_status()
-            commits = resp.json()
+            branches = []
 
-            for c in commits:
-                commit_data = c["commit"]
-                author = commit_data["author"]
-                date = author["date"]
+        if not branches:
+            # Fallback: fetch default branch only
+            branches = [""]
 
-                was_new = self._db.insert_commit(
-                    sha=c["sha"],
-                    org=org,
-                    repo=repo,
-                    author=author["name"],
-                    email=author["email"],
-                    date=date,
-                    message=commit_data.get("message", ""),
+        inserted = 0
+        newest_date: str | None = None
+
+        for branch in branches:
+            if branch:
+                url: str | None = f"{BASE_URL}/repos/{org}/{repo}/commits?sha={branch}&per_page=100&since={since_date}"
+            else:
+                url = f"{BASE_URL}/repos/{org}/{repo}/commits?per_page=100&since={since_date}"
+
+            while url:
+                self._emit(
+                    FetchProgress(
+                        phase="commits",
+                        org=org,
+                        repo=repo,
+                        current=inserted,
+                        message=f"Fetching {repo}/{branch or 'default'} ({inserted} new)",
+                    )
                 )
-                if was_new:
-                    inserted += 1
-                    if newest_date is None or date > newest_date:
-                        newest_date = date
+                try:
+                    resp = await self._client.get(url)
+                    resp.raise_for_status()
+                except Exception:
+                    break
+                commits = resp.json()
+                if not commits:
+                    break
 
-            url = self._parse_next_url(resp.headers)
+                for c in commits:
+                    commit_data = c["commit"]
+                    author = commit_data["author"]
+                    date = author["date"]
+
+                    was_new = self._db.insert_commit(
+                        sha=c["sha"],
+                        org=org,
+                        repo=repo,
+                        author=author["name"],
+                        email=author["email"],
+                        date=date,
+                        message=commit_data.get("message", ""),
+                    )
+                    if was_new:
+                        inserted += 1
+                        if newest_date is None or date > newest_date:
+                            newest_date = date
+
+                url = self._parse_next_url(resp.headers)
 
         # Update repo sync bookmark
         if newest_date:
