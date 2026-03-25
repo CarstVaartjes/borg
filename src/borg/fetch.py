@@ -205,12 +205,13 @@ class GitHubFetcher:
         in_production: bool = False,
         pr_number: int | None = None,
         pr_state: str | None = None,
-    ) -> tuple[int, str | None]:
+    ) -> tuple[int, int, str | None]:
         """Fetch paginated commits from a URL, inserting new ones.
 
         Returns:
-            Tuple of (inserted_count, newest_date).
+            Tuple of (total_fetched, new_inserted, newest_date).
         """
+        total = 0
         inserted = 0
         newest_date: str | None = None
         next_url: str | None = url
@@ -226,6 +227,7 @@ class GitHubFetcher:
                 break
 
             for c in commits:
+                total += 1
                 commit_data = c["commit"]
                 author = commit_data["author"]
                 date = author["date"]
@@ -249,7 +251,7 @@ class GitHubFetcher:
 
             next_url = self._parse_next_url(resp.headers)
 
-        return inserted, newest_date
+        return total, inserted, newest_date
 
     async def fetch_repo_commits(self, org: str, repo: str, since: str) -> int:
         """Fetch commits for a repo since a given date.
@@ -352,20 +354,21 @@ class GitHubFetcher:
             is_production = bool(merged_at) and base_branch in ("main", "master")
 
             pr_title = pr.get("title", "")[:50]
-            self._emit(FetchProgress(
-                phase="commits", org=org, repo=repo,
-                current=i, total=pr_total,
-                message=f"  PR {i}/{pr_total}: #{pr['number']} [{pr_state_val}] {pr_title} ({inserted} commits)",
-            ))
 
             pr_url = f"{BASE_URL}/repos/{org}/{repo}/pulls/{pr['number']}/commits?per_page=100"
-            pr_inserted, pr_commit_date = await self._fetch_paginated_commits(
+            pr_total_commits, pr_new, pr_commit_date = await self._fetch_paginated_commits(
                 pr_url, org, repo,
                 in_production=is_production,
                 pr_number=pr["number"],
                 pr_state=pr_state_val,
             )
-            inserted += pr_inserted
+            inserted += pr_new
+
+            self._emit(FetchProgress(
+                phase="commits", org=org, repo=repo,
+                current=i, total=pr_total,
+                message=f"  PR {i}/{pr_total}: #{pr['number']} [{pr_state_val}] {pr_title} ({pr_total_commits} commits, {pr_new} new)",
+            ))
             if pr_commit_date and (newest_date is None or pr_commit_date > newest_date):
                 newest_date = pr_commit_date
 
