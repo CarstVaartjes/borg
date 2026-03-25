@@ -40,7 +40,7 @@ uv run borg
 
 ### Who's using AI the most?
 
-The **Authors** tab ranks everyone by AI commits, total commits, percentages, and lines of code. Click any row for commit details. The top contributor gets the *Skynet Employee of the Month* treatment — complete with a Braille-art portrait fetched from GitHub, work pattern charts, and favourite commit word.
+The **Authors** tab ranks everyone by AI commits, total commits, percentages, and lines of code. Click any row for commit details. Select any author to see their *Skynet Employee of the Month* profile — Braille-art portrait fetched from GitHub, day/hour work patterns, favourite repo, favourite commit word, and linked identities.
 
 <p align="center">
   <img src="docs/screenshots/authors.svg" alt="Authors — Skynet Employee of the Month" width="100%">
@@ -159,7 +159,7 @@ Detection runs locally in a single SQLite transaction — no API calls, instant,
 - **No trailer = high-confidence detection impossible.** The medium/low heuristics catch many cases, but false positives are possible.
 - **Squash SHAs are new.** The original PR commits never appear on main, so `in_production` is based on PR target branch.
 - **PR commits API has no `since` filter.** Commits before the org's floor date are filtered at insert time.
-- **Author fuzzy matching has false positives.** "Jose Jimenez" and "Jose Romero" share "Jose" but are different people. Review suggestions before applying.
+- **Author fuzzy matching has false positives.** "Alex Smith" and "Alex Johnson" share "Alex" but are different people. Review suggestions before applying.
 
 ## Requirements
 
