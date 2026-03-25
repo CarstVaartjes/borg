@@ -1,4 +1,4 @@
-"""Fetch GitHub avatars and convert to ASCII art."""
+"""Fetch GitHub avatars and convert to Braille art."""
 from __future__ import annotations
 
 import hashlib
@@ -9,8 +9,17 @@ from io import BytesIO
 
 import httpx
 
-# ASCII brightness ramp — more chars = smoother gradients
-_ASCII_RAMP = " .'`^\",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
+# Braille dot positions: each char is a 2x4 grid
+# Dot numbering:  1 4
+#                 2 5
+#                 3 6
+#                 7 8
+_BRAILLE_BASE = 0x2800
+_BRAILLE_DOTS = [
+    (0, 0, 0x01), (1, 0, 0x02), (2, 0, 0x04),
+    (0, 1, 0x08), (1, 1, 0x10), (2, 1, 0x20),
+    (3, 0, 0x40), (3, 1, 0x80),
+]
 
 
 def _get_gh_token() -> str | None:
@@ -26,7 +35,6 @@ def _get_gh_token() -> str | None:
 
 def _extract_github_username(email: str) -> str | None:
     """Extract GitHub username from noreply email pattern."""
-    # Pattern: 12345+username@users.noreply.github.com
     match = re.match(r"\d+\+(.+)@users\.noreply\.github\.com", email)
     if match:
         return match.group(1)
@@ -59,7 +67,7 @@ def fetch_avatar_url(emails: tuple[str, ...]) -> str | None:
             except Exception:
                 pass
 
-    # 2. Try GitHub search by email (finds users by their commit email)
+    # 2. Try GitHub search by email
     if token:
         for email in emails:
             if "@" not in email or "noreply" in email:
@@ -82,26 +90,26 @@ def fetch_avatar_url(emails: tuple[str, ...]) -> str | None:
     for email in emails:
         if "@" in email and "noreply" not in email:
             email_hash = hashlib.md5(email.strip().lower().encode()).hexdigest()
-            return f"https://www.gravatar.com/avatar/{email_hash}?s=64&d=identicon"
+            return f"https://www.gravatar.com/avatar/{email_hash}?s=256&d=identicon"
 
     return None
 
 
 @lru_cache(maxsize=64)
 def image_to_ascii(url: str, width: int = 30, height: int = 15) -> str:
-    """Download an image and convert to detailed ASCII art.
+    """Download an image and convert to Braille dot art.
 
-    Uses a 70-level brightness ramp for smooth gradients.
-    Characters are doubled horizontally to compensate for terminal
-    character aspect ratio (~2:1 height:width).
+    Each Braille character represents a 2x4 pixel grid, giving very high
+    resolution in the terminal. The result has width/2 characters per line
+    and height/4 lines.
 
     Args:
         url: Image URL to download.
-        width: Art width in characters.
-        height: Art height in lines.
+        width: Pixel width (will use width*2 actual pixels).
+        height: Character height (will use height*4 actual pixels).
 
     Returns:
-        Multi-line ASCII art string.
+        Multi-line Braille art string.
     """
     try:
         resp = httpx.get(url, timeout=5.0)
@@ -111,22 +119,35 @@ def image_to_ascii(url: str, width: int = 30, height: int = 15) -> str:
         return _name_art("?")
 
     try:
-        from PIL import Image, ImageFilter
+        from PIL import Image, ImageEnhance, ImageFilter
 
         img = Image.open(BytesIO(image_bytes)).convert("L")
-        # Slightly sharpen for better detail at small sizes
         img = img.filter(ImageFilter.SHARPEN)
-        img = img.resize((width, height))
+        img = ImageEnhance.Contrast(img).enhance(1.4)
+
+        # Braille: 2 dots wide, 4 dots tall per character
+        px_w = width * 2
+        px_h = height * 4
+        img = img.resize((px_w, px_h))
         pixels = list(img.getdata())
 
-        ramp_len = len(_ASCII_RAMP)
+        # Compute threshold (median brightness)
+        threshold = sorted(pixels)[len(pixels) // 2]
+
+        def is_dark(row: int, col: int) -> bool:
+            if row >= px_h or col >= px_w:
+                return False
+            return pixels[row * px_w + col] < threshold
+
         lines = []
-        for row in range(height):
+        for char_row in range(0, px_h, 4):
             line = ""
-            for col in range(width):
-                pixel = 255 - pixels[row * width + col]  # invert: dark bg
-                idx = pixel * (ramp_len - 1) // 255
-                line += _ASCII_RAMP[idx]
+            for char_col in range(0, px_w, 2):
+                code = _BRAILLE_BASE
+                for dy, dx, dot in _BRAILLE_DOTS:
+                    if is_dark(char_row + dy, char_col + dx):
+                        code |= dot
+                line += chr(code)
             lines.append(line)
         return "\n".join(lines)
     except ImportError:
@@ -146,15 +167,15 @@ def _name_art(name: str) -> str:
 
 
 def get_ascii_avatar(emails: list[str], width: int = 30, height: int = 15) -> str:
-    """Get ASCII art avatar for an author.
+    """Get Braille art avatar for an author.
 
     Args:
         emails: List of the author's email addresses.
-        width: ASCII width.
-        height: ASCII height.
+        width: Character width of output.
+        height: Character height of output.
 
     Returns:
-        ASCII art string.
+        Braille art string.
     """
     url = fetch_avatar_url(tuple(emails))
     if url:
