@@ -170,6 +170,8 @@ class AuthorsTab(Static):
             "its", "after", "before", "instead", "without", "about",
             "which", "where", "some", "other", "using", "used",
             "claude", "copilot", "cursor", "aider", "openai", "opus",
+            "visualfabriq", "pull", "request", "uat", "prod", "production",
+            "preprod", "deploy", "release", "version", "bump", "config",
         }
 
         counts: dict[str, int] = {}
