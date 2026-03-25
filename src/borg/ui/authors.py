@@ -47,8 +47,7 @@ class AuthorsTab(Static):
         pct = f"{ai / total * 100:.1f}%" if total > 0 else "0%"
 
         header = (
-            f"⭐ Skynet Employee\n"
-            f"   of the Month\n"
+            f"⭐ Skynet Employee of the Month\n"
             f"\n"
             f"  {name}\n"
             f"  {ai} AI / {total} total ({pct})\n"
