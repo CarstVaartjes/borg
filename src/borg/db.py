@@ -249,6 +249,69 @@ class Database:
         self.conn.execute("DELETE FROM author_aliases WHERE email = ?", (email,))
         self.conn.commit()
 
+    def suggest_alias_merges(self) -> list[dict]:
+        """Suggest identity groups that might be the same person.
+
+        Uses fuzzy matching: one name is a substring of another, or they
+        share a word (first/last name). Only suggests across groups that
+        aren't already merged.
+
+        Returns:
+            List of dicts with 'name_a', 'emails_a', 'name_b', 'emails_b'.
+        """
+        groups = self.get_identity_groups()
+        suggestions: list[dict] = []
+        seen: set[tuple[str, str]] = set()
+
+        for i, a in enumerate(groups):
+            for b in groups[i + 1:]:
+                na = a["canonical_name"].lower()
+                nb = b["canonical_name"].lower()
+                key = (min(na, nb), max(na, nb))
+                if key in seen:
+                    continue
+
+                # Check: one name contains the other
+                match = na in nb or nb in na
+                # Check: share a word (at least 3 chars to avoid 'a', 'de', etc.)
+                if not match:
+                    words_a = {w for w in na.split() if len(w) >= 3}
+                    words_b = {w for w in nb.split() if len(w) >= 3}
+                    match = bool(words_a & words_b)
+
+                if match:
+                    seen.add(key)
+                    # Suggest merging smaller group into larger
+                    if len(a["emails"]) >= len(b["emails"]):
+                        target, source = a, b
+                    else:
+                        target, source = b, a
+                    suggestions.append({
+                        "target_name": target["canonical_name"],
+                        "target_emails": target["emails"],
+                        "source_name": source["canonical_name"],
+                        "source_emails": source["emails"],
+                    })
+
+        return suggestions
+
+    def apply_suggested_merges(self, suggestions: list[dict]) -> int:
+        """Apply a list of merge suggestions as manual aliases.
+
+        Args:
+            suggestions: List from suggest_alias_merges.
+
+        Returns:
+            Number of aliases created.
+        """
+        count = 0
+        for s in suggestions:
+            target_name = s["target_name"]
+            for email in s["source_emails"]:
+                self.set_author_alias(email, target_name)
+                count += 1
+        return count
+
     def get_identity_groups(self) -> list[dict]:
         """Get the current author identity groups for display.
 
