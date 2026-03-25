@@ -9,8 +9,8 @@ from io import BytesIO
 
 import httpx
 
-# ASCII brightness ramp (dark to bright)
-_ASCII_CHARS = " .:-=+*#%@"
+# ASCII brightness ramp (bright to dark — inverted for typical light-bg photos)
+_ASCII_CHARS = "@%#*+=-:. "
 
 
 def _get_gh_token() -> str | None:
