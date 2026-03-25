@@ -115,6 +115,14 @@ class AuthorsTab(Static):
         for hr in hour_rows:
             hour_counts[hr["hour"]] = hr["cnt"]
 
+        # Favourite word
+        msg_rows = self.db.conn.execute(
+            f"SELECT message FROM commits WHERE commits.email IN ({placeholders}) "
+            f"AND message IS NOT NULL",
+            email_list,
+        ).fetchall()
+        fav_word = self._favourite_word([r["message"] for r in msg_rows])
+
         # Build text: name first, then avatar, then stats below
         title = (
             f"⭐ Skynet Employee of the Month\n\n"
@@ -137,11 +145,45 @@ class AuthorsTab(Static):
             bar_height=5, col_width=2,
         )
 
-        stats = f"\n  Favourite repo: {fav}\n\n"
+        stats = f"\n  Favourite repo: {fav}\n  Favourite word: {fav_word}\n\n"
         stats += self._side_by_side(day_chart, hour_chart, gap=2)
 
         self._set_avatar_text(title + "\n  Loading avatar...")
         self._fetch_avatar(title, stats, tuple(email_list))
+
+    @staticmethod
+    def _favourite_word(messages: list[str]) -> str:
+        """Find the most common meaningful word across commit messages."""
+        import re
+
+        stop_words = {
+            "a", "an", "the", "and", "or", "but", "in", "on", "at", "to",
+            "for", "of", "with", "by", "from", "is", "it", "as", "be",
+            "was", "are", "been", "this", "that", "not", "no", "if", "so",
+            "we", "all", "do", "up", "out", "into", "when", "than", "then",
+            "co", "authored", "noreply", "com", "anthropic", "github",
+            "merge", "fix", "feat", "chore", "docs", "test", "ci", "refactor",
+            "add", "update", "remove", "use", "set", "get", "new", "change",
+            "make", "move", "run", "pr", "branch", "master", "main",
+            "also", "now", "just", "only", "more", "each", "via", "per",
+            "should", "can", "will", "has", "had", "have", "did", "does",
+            "its", "after", "before", "instead", "without", "about",
+            "which", "where", "some", "other", "using", "used",
+        }
+
+        counts: dict[str, int] = {}
+        for msg in messages:
+            # Extract words, skip Jira tickets (PROJ-123)
+            words = re.findall(r"[a-z]{3,}", msg.lower())
+            for word in words:
+                if word not in stop_words and not word.startswith("http"):
+                    counts[word] = counts.get(word, 0) + 1
+
+        if not counts:
+            return "—"
+
+        top = sorted(counts.items(), key=lambda x: -x[1])[:1]
+        return top[0][0]
 
     @staticmethod
     def _side_by_side(left: str, right: str, gap: int = 3) -> str:
