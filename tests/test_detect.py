@@ -226,6 +226,27 @@ def test_conventional_commit_not_triggered_on_multiline(tmp_db: Path) -> None:
     assert row["ai_confidence"] == "medium"
 
 
+def test_jira_prefix_heuristic(tmp_db: Path) -> None:
+    """Detects Jira ticket prefix: PROJ-123: Sentence."""
+    db = Database(tmp_db)
+    _insert_commit(db, "jira1", "AI-482: Switch agent instructions from DynamoDB to PostgreSQL")
+    _insert_commit(db, "jira2", "DFM-4375: Fix A-10 security writing for metadata")
+    detect_ai(db)
+    for sha in ("jira1", "jira2"):
+        row = db.conn.execute(f"SELECT ai_tool, ai_confidence FROM commits WHERE sha = '{sha}'").fetchone()
+        assert row["ai_tool"] == "ai-assisted", f"{sha} should be ai-assisted"
+        assert row["ai_confidence"] == "low", f"{sha} should be low"
+
+
+def test_jira_prefix_not_triggered_without_colon(tmp_db: Path) -> None:
+    """Jira ticket without colon should not match."""
+    db = Database(tmp_db)
+    _insert_commit(db, "jira3", "DFM-4375 fix something quickly here now")
+    detect_ai(db)
+    row = db.conn.execute("SELECT ai_tool FROM commits WHERE sha = 'jira3'").fetchone()
+    assert row["ai_tool"] is None
+
+
 def test_conventional_commit_not_triggered_on_too_short(tmp_db: Path) -> None:
     """Very short conventional commits should not match."""
     db = Database(tmp_db)

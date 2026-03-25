@@ -118,9 +118,10 @@ def detect_ai(db: Database) -> dict[str, int]:
             "AND message NOT LIKE 'Merge %'"
         )
 
-        # Conventional commit prefix heuristic: messages like "fix: do something"
-        # or "feat: add feature". AI tools commonly produce these short, clean
-        # single-line messages with a conventional prefix.
+        # Conventional commit / Jira ticket prefix heuristic:
+        # - "fix: do something", "feat: add feature" (conventional commits)
+        # - "JIRA-123: do something", "DFM-4375: fix bug" (ticket prefix)
+        # AI tools commonly produce these clean single-line messages.
         conn.execute(
             "UPDATE commits SET ai_tool = 'ai-assisted', ai_confidence = 'low' "
             "WHERE ai_tool IS NULL "
@@ -129,6 +130,8 @@ def detect_ai(db: Database) -> dict[str, int]:
             "  OR message LIKE 'refactor: %' OR message LIKE 'docs: %' OR message LIKE 'test: %'"
             "  OR message LIKE 'ci: %' OR message LIKE 'perf: %' OR message LIKE 'style: %'"
             "  OR message LIKE 'build: %'"
+            # Jira-style: PROJ-123: Sentence description (colon required)
+            "  OR message GLOB '[A-Z]*-[0-9]*: [A-Z]*'"
             ") "
             "AND message NOT LIKE '%' || char(10) || '%' "
             "AND length(message) BETWEEN 15 AND 120 "
