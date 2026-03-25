@@ -47,6 +47,9 @@ class Database:
                 message TEXT,
                 ai_tool TEXT,
                 ai_confidence TEXT,
+                in_production INTEGER NOT NULL DEFAULT 0,
+                pr_number INTEGER,
+                pr_state TEXT,
                 fetched_at TEXT NOT NULL
             );
 
@@ -418,6 +421,9 @@ class Database:
         email: str,
         date: str,
         message: str,
+        in_production: bool = False,
+        pr_number: int | None = None,
+        pr_state: str | None = None,
     ) -> bool:
         """Insert a new commit.
 
@@ -429,6 +435,9 @@ class Database:
             email: Author email.
             date: Commit date.
             message: Commit message.
+            in_production: True if the PR was merged to production.
+            pr_number: PR number this commit belongs to.
+            pr_state: PR state — "merged", "open", or "closed".
 
         Returns:
             True if inserted (new), False if duplicate.
@@ -436,13 +445,27 @@ class Database:
         try:
             self.conn.execute(
                 """INSERT INTO commits
-                   (sha, org, repo, author, email, date, message, fetched_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (sha, org, repo, author, email, date, message, self._utc_now()),
+                   (sha, org, repo, author, email, date, message,
+                    in_production, pr_number, pr_state, fetched_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    sha, org, repo, author, email, date, message,
+                    1 if in_production else 0, pr_number, pr_state,
+                    self._utc_now(),
+                ),
             )
             self.conn.commit()
             return True
         except sqlite3.IntegrityError:
+            # Commit already exists — but if this PR is merged to main,
+            # promote in_production to 1 (a commit can flow through
+            # uat → preprod → main across multiple PRs)
+            if in_production:
+                self.conn.execute(
+                    "UPDATE commits SET in_production = 1 WHERE sha = ?",
+                    (sha,),
+                )
+                self.conn.commit()
             return False
 
     def update_commit_stats(self, sha: str, additions: int, deletions: int) -> None:

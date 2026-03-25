@@ -136,7 +136,9 @@ class TestFetchRepoCommits:
             {
                 "number": 42,
                 "merged_at": "2025-06-02T12:00:00Z",
+                "updated_at": "2025-06-02T12:00:00Z",
                 "state": "closed",
+                "base": {"ref": "main"},
             },
         ]
 
