@@ -131,7 +131,17 @@ class TestFetchRepoCommits:
             db.org_add("myorg", "2025-01-01")
             fetcher = GitHubFetcher(db)
 
-        commits_json = [
+        # PR list response (one merged PR)
+        pr_list_json = [
+            {
+                "number": 42,
+                "merged_at": "2025-06-02T12:00:00Z",
+                "state": "closed",
+            },
+        ]
+
+        # PR commits response
+        pr_commits_json = [
             {
                 "sha": "abc123",
                 "commit": {
@@ -140,7 +150,7 @@ class TestFetchRepoCommits:
                         "email": "dev@example.com",
                         "date": "2025-06-01T10:00:00Z",
                     },
-                    "message": "feat: add feature",
+                    "message": "feat: add feature\n\nCo-Authored-By: Claude <noreply@anthropic.com>",
                 },
             },
             {
@@ -156,14 +166,20 @@ class TestFetchRepoCommits:
             },
         ]
 
-        mock_response = MagicMock()
-        mock_response.json.return_value = commits_json
-        mock_response.status_code = 200
-        mock_response.headers = {}
-        mock_response.raise_for_status = MagicMock()
+        async def mock_get(url, **kwargs):
+            resp = MagicMock()
+            resp.headers = {}
+            resp.raise_for_status = MagicMock()
+            if "/pulls?" in url:
+                resp.json.return_value = pr_list_json
+            elif "/pulls/42/commits" in url:
+                resp.json.return_value = pr_commits_json
+            else:
+                resp.json.return_value = []
+            return resp
 
         fetcher._client = AsyncMock(spec=httpx.AsyncClient)
-        fetcher._client.get = AsyncMock(return_value=mock_response)
+        fetcher._client.get = AsyncMock(side_effect=mock_get)
 
         count = await fetcher.fetch_repo_commits("myorg", "my-repo", "2025-01-01")
         assert count == 2

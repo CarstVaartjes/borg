@@ -197,34 +197,60 @@ class GitHubFetcher:
 
         return repos
 
-    async def fetch_branches(self, org: str, repo: str) -> list[str]:
-        """List all branch names for a repo.
-
-        Args:
-            org: Organization name.
-            repo: Repository name.
+    async def _fetch_paginated_commits(
+        self, url: str, org: str, repo: str
+    ) -> tuple[int, str | None]:
+        """Fetch paginated commits from a URL, inserting new ones.
 
         Returns:
-            List of branch names.
+            Tuple of (inserted_count, newest_date).
         """
-        branches: list[str] = []
-        url: str | None = f"{BASE_URL}/repos/{org}/{repo}/branches?per_page=100"
+        inserted = 0
+        newest_date: str | None = None
+        next_url: str | None = url
 
-        while url:
-            resp = await self._client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
-            branches.extend(b["name"] for b in data)
-            url = self._parse_next_url(resp.headers)
+        while next_url:
+            try:
+                resp = await self._client.get(next_url)
+                resp.raise_for_status()
+            except Exception:
+                break
+            commits = resp.json()
+            if not commits:
+                break
 
-        return branches
+            for c in commits:
+                commit_data = c["commit"]
+                author = commit_data["author"]
+                date = author["date"]
+
+                was_new = self._db.insert_commit(
+                    sha=c["sha"],
+                    org=org,
+                    repo=repo,
+                    author=author["name"],
+                    email=author["email"],
+                    date=date,
+                    message=commit_data.get("message", ""),
+                )
+                if was_new:
+                    inserted += 1
+                    if newest_date is None or date > newest_date:
+                        newest_date = date
+
+            next_url = self._parse_next_url(resp.headers)
+
+        return inserted, newest_date
 
     async def fetch_repo_commits(self, org: str, repo: str, since: str) -> int:
-        """Fetch commits for a repo across all branches since a given date.
+        """Fetch commits for a repo since a given date.
 
-        Iterates over every branch to capture commits that may be lost
-        in squash merges on the default branch. INSERT OR IGNORE deduplicates
-        by SHA when the same commit appears on multiple branches.
+        Two-phase approach:
+        1. Fetch default branch commits (the squash-merged results)
+        2. Fetch individual PR commits (which have the original Co-Authored-By
+           trailers that get stripped by squash merge)
+
+        INSERT OR IGNORE deduplicates by SHA across both phases.
 
         Args:
             org: Organization name.
@@ -234,74 +260,18 @@ class GitHubFetcher:
         Returns:
             Number of new commits inserted.
         """
-        # Use bookmark if available, otherwise fall back to since
         bookmark = self._db.get_repo_bookmark(org, repo)
         since_date = bookmark or since
 
-        # Fetch all branches so we see commits before squash-merge
-        try:
-            branches = await self.fetch_branches(org, repo)
-        except Exception as e:
-            self._emit(
-                FetchProgress(
-                    phase="commits", org=org, repo=repo,
-                    message=f"Warning: could not list branches for {repo}: {e}",
-                )
-            )
-            branches = []
-
-        if not branches:
-            # Fallback: fetch default branch only
-            branches = [""]
-
-        inserted = 0
-        newest_date: str | None = None
-
-        for branch in branches:
-            if branch:
-                url: str | None = f"{BASE_URL}/repos/{org}/{repo}/commits?sha={branch}&per_page=100&since={since_date}"
-            else:
-                url = f"{BASE_URL}/repos/{org}/{repo}/commits?per_page=100&since={since_date}"
-
-            while url:
-                self._emit(
-                    FetchProgress(
-                        phase="commits",
-                        org=org,
-                        repo=repo,
-                        current=inserted,
-                        message=f"Fetching {repo}/{branch or 'default'} ({inserted} new)",
-                    )
-                )
-                try:
-                    resp = await self._client.get(url)
-                    resp.raise_for_status()
-                except Exception:
-                    break
-                commits = resp.json()
-                if not commits:
-                    break
-
-                for c in commits:
-                    commit_data = c["commit"]
-                    author = commit_data["author"]
-                    date = author["date"]
-
-                    was_new = self._db.insert_commit(
-                        sha=c["sha"],
-                        org=org,
-                        repo=repo,
-                        author=author["name"],
-                        email=author["email"],
-                        date=date,
-                        message=commit_data.get("message", ""),
-                    )
-                    if was_new:
-                        inserted += 1
-                        if newest_date is None or date > newest_date:
-                            newest_date = date
-
-                url = self._parse_next_url(resp.headers)
+        # Fetch individual commits from merged PRs. This captures the original
+        # Co-Authored-By trailers that get stripped by squash merge. We skip
+        # default-branch commits entirely — in a squash-merge workflow they're
+        # just merge artifacts without trailers.
+        self._emit(FetchProgress(
+            phase="commits", org=org, repo=repo,
+            message=f"Fetching {repo} PR commits...",
+        ))
+        inserted, newest_date = await self._fetch_pr_commits(org, repo, since_date)
 
         # Update repo sync bookmark
         if newest_date:
@@ -309,6 +279,65 @@ class GitHubFetcher:
             self._db.update_repo_sync(org, repo, newest_date, existing_count + inserted)
 
         return inserted
+
+    async def _fetch_pr_commits(
+        self, org: str, repo: str, since: str
+    ) -> tuple[int, str | None]:
+        """Fetch individual commits from merged PRs to capture AI trailers.
+
+        GitHub squash-merge strips Co-Authored-By trailers. By fetching
+        the original PR commits, we recover these trailers for detection.
+
+        Args:
+            org: Organization name.
+            repo: Repository name.
+            since: ISO date to fetch PRs merged after.
+
+        Returns:
+            Tuple of (inserted_count, newest_commit_date).
+        """
+        inserted = 0
+        newest_date: str | None = None
+        url: str | None = (
+            f"{BASE_URL}/repos/{org}/{repo}/pulls?"
+            f"state=closed&sort=updated&direction=desc&per_page=50"
+        )
+
+        while url:
+            try:
+                resp = await self._client.get(url)
+                resp.raise_for_status()
+            except Exception:
+                break
+            prs = resp.json()
+            if not prs:
+                break
+
+            found_old = False
+            for pr in prs:
+                # Only merged PRs
+                merged_at = pr.get("merged_at")
+                if not merged_at:
+                    continue
+                # Stop when we hit PRs merged before our since date
+                if merged_at < since:
+                    found_old = True
+                    break
+
+                # Fetch individual commits for this PR
+                pr_url = f"{BASE_URL}/repos/{org}/{repo}/pulls/{pr['number']}/commits?per_page=100"
+                pr_inserted, pr_date = await self._fetch_paginated_commits(
+                    pr_url, org, repo
+                )
+                inserted += pr_inserted
+                if pr_date and (newest_date is None or pr_date > newest_date):
+                    newest_date = pr_date
+
+            if found_old:
+                break
+            url = self._parse_next_url(resp.headers)
+
+        return inserted, newest_date
 
     async def enrich_commits(self) -> int:
         """Enrich unenriched commits with additions/deletions stats.
