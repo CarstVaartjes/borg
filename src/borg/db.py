@@ -390,11 +390,11 @@ class Database:
             try:
                 self.conn.execute("SELECT 1 FROM _author_identity LIMIT 1")
                 clauses.append(
-                    "email IN (SELECT email FROM _author_identity WHERE canonical_name = ?)"
+                    "commits.email IN (SELECT email FROM _author_identity WHERE canonical_name = ?)"
                 )
             except Exception:
                 clauses.append(
-                    "email IN (SELECT DISTINCT email FROM commits WHERE author = ?)"
+                    "commits.email IN (SELECT DISTINCT email FROM commits c2 WHERE c2.author = ?)"
                 )
             params.append(author)
         if month:
