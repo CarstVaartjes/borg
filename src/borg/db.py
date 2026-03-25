@@ -18,7 +18,9 @@ class QueryFilters:
     org: str | None = None
     repo: str | None = None
     author: str | None = None
-    loc_mode: str = "both"  # "both" = additions+deletions, "added" = additions only
+    month: str | None = None  # "2026-03"
+    week: str | None = None   # "2026-W12"
+    loc_mode: str = "both"    # "both" = additions+deletions, "added" = additions only
 
 
 class Database:
@@ -363,18 +365,12 @@ class Database:
         org: str | None = None,
         repo: str | None = None,
         author: str | None = None,
+        month: str | None = None,
+        week: str | None = None,
     ) -> tuple[str, tuple]:
-        """Build a WHERE clause fragment with optional org/repo/author filters.
+        """Build a WHERE clause with optional filters.
 
         Always excludes merge commits, reverts, and conflict resolutions.
-
-        Args:
-            org: Org name to filter by, or None.
-            repo: Repo name to filter by, or None.
-            author: Author canonical name to filter by, or None.
-
-        Returns:
-            Tuple of (where_clause, params_tuple).
         """
         clauses = [
             "message NOT LIKE 'Merge %'",
@@ -391,7 +387,6 @@ class Database:
             clauses.append("repo = ?")
             params.append(repo)
         if author:
-            # Use identity table if available
             try:
                 self.conn.execute("SELECT 1 FROM _author_identity LIMIT 1")
                 clauses.append(
@@ -402,6 +397,12 @@ class Database:
                     "email IN (SELECT DISTINCT email FROM commits WHERE author = ?)"
                 )
             params.append(author)
+        if month:
+            clauses.append("strftime('%Y-%m', date) = ?")
+            params.append(month)
+        if week:
+            clauses.append("strftime('%Y-W%W', date) = ?")
+            params.append(week)
 
         return (" AND ".join(clauses), tuple(params))
 
@@ -523,7 +524,7 @@ class Database:
     def query_summary(self, org: str | None = None, filters: QueryFilters | None = None) -> dict:
         """Get summary statistics."""
         f = filters or QueryFilters(org=org)
-        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author)
+        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author, month=f.month, week=f.week)
         loc = self.loc_expr(f.loc_mode)
         row = self.conn.execute(
             f"""
@@ -542,7 +543,7 @@ class Database:
     def query_by_tool(self, org: str | None = None, filters: QueryFilters | None = None) -> list[dict]:
         """Get commit counts grouped by AI tool."""
         f = filters or QueryFilters(org=org)
-        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author)
+        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author, month=f.month, week=f.week)
         loc = self.loc_expr(f.loc_mode)
         rows = self.conn.execute(
             f"""
@@ -576,7 +577,7 @@ class Database:
             raise ValueError(f"Invalid order_by: {order_by}")
 
         f = filters or QueryFilters(org=org)
-        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author)
+        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author, month=f.month, week=f.week)
         loc = self.loc_expr(f.loc_mode)
         direction = "ASC" if ascending else "DESC"
 
@@ -629,7 +630,7 @@ class Database:
     ) -> list[dict]:
         """Get commit trends over time."""
         f = filters or QueryFilters(org=org)
-        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author)
+        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author, month=f.month, week=f.week)
         loc = self.loc_expr(f.loc_mode)
         period_expr = "strftime('%Y-W%W', date)" if period == "weekly" else "strftime('%Y-%m', date)"
 
@@ -653,7 +654,7 @@ class Database:
     def query_skynet_employee(self, org: str | None = None, filters: QueryFilters | None = None) -> dict | None:
         """Get the author with the most AI commits in the last 7 days."""
         f = filters or QueryFilters(org=org)
-        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author)
+        where, params = self._build_filter(org=f.org, repo=f.repo, author=f.author, month=f.month, week=f.week)
         try:
             self.conn.execute("SELECT 1 FROM _author_identity LIMIT 1")
             name_expr = "COALESCE(aid.canonical_name, commits.author)"

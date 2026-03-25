@@ -91,6 +91,18 @@ class BorgApp(App):
     #rules-table {
         max-height: 30%;
     }
+    /* Authors tab layout */
+    #authors-layout {
+        height: 1fr;
+    }
+    #authors-layout RankingTab {
+        width: 2fr;
+    }
+    #avatar-panel {
+        width: 35;
+        padding: 1 2;
+        border-left: tall $accent;
+    }
     /* Trends tab */
     #trend-toggle {
         height: 3;
@@ -144,6 +156,8 @@ class BorgApp(App):
     org_filter: str | None = None
     repo_filter: str | None = None
     author_filter: str | None = None
+    month_filter: str | None = None
+    week_filter: str | None = None
     loc_mode: str = "both"
 
     def __init__(self, db_path: Path) -> None:
@@ -157,6 +171,8 @@ class BorgApp(App):
             org=self.org_filter,
             repo=self.repo_filter,
             author=self.author_filter,
+            month=self.month_filter,
+            week=self.week_filter,
             loc_mode=self.loc_mode,
         )
 
@@ -169,6 +185,10 @@ class BorgApp(App):
             yield Select([], prompt="All repos", allow_blank=True, id="repo-select")
             yield Label("Author:")
             yield Select([], prompt="All authors", allow_blank=True, id="author-select")
+            yield Label("Month:")
+            yield Select([], prompt="All", allow_blank=True, id="month-select")
+            yield Label("Week:")
+            yield Select([], prompt="All", allow_blank=True, id="week-select")
             yield Label("LOC:")
             yield Select(
                 [("Added + Deleted", "both"), ("Added only", "added")],
@@ -217,7 +237,7 @@ class BorgApp(App):
         self.query_one("#repo-select", Select).set_options(
             [(r["repo"], r["repo"]) for r in repos]
         )
-        # Authors (from identity table if available)
+        # Authors
         try:
             authors = self.db.conn.execute(
                 "SELECT DISTINCT canonical_name FROM _author_identity ORDER BY canonical_name"
@@ -232,6 +252,20 @@ class BorgApp(App):
             self.query_one("#author-select", Select).set_options(
                 [(a["author"], a["author"]) for a in authors]
             )
+        # Months
+        months = self.db.conn.execute(
+            "SELECT DISTINCT strftime('%Y-%m', date) as m FROM commits ORDER BY m DESC"
+        ).fetchall()
+        self.query_one("#month-select", Select).set_options(
+            [(m["m"], m["m"]) for m in months if m["m"]]
+        )
+        # Weeks
+        weeks = self.db.conn.execute(
+            "SELECT DISTINCT strftime('%Y-W%W', date) as w FROM commits ORDER BY w DESC"
+        ).fetchall()
+        self.query_one("#week-select", Select).set_options(
+            [(w["w"], w["w"]) for w in weeks if w["w"]]
+        )
 
     # Keep backward-compatible alias
     def refresh_org_dropdown(self) -> None:
@@ -246,6 +280,10 @@ class BorgApp(App):
             self.repo_filter = value
         elif sid == "author-select":
             self.author_filter = value
+        elif sid == "month-select":
+            self.month_filter = value
+        elif sid == "week-select":
+            self.week_filter = value
         elif sid == "loc-select":
             self.loc_mode = value or "both"
         self._refresh_active_tab()
