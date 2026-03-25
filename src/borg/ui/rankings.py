@@ -28,10 +28,19 @@ class RankingTab(Static):
         self._order_by = "ai_commits"
         self._ascending = False
 
+    DEFAULT_CSS = """
+    RankingTab #ranking-hint {
+        height: 1;
+        color: $text-muted;
+        padding: 0 1;
+    }
+    """
+
     def compose(self) -> ComposeResult:
         table = DataTable(id="ranking-table")
         table.cursor_type = "row"
         yield table
+        yield Static("Enter: view commits  |  Click header: sort", id="ranking-hint")
 
     def on_mount(self) -> None:
         table = self.query_one("#ranking-table", DataTable)
