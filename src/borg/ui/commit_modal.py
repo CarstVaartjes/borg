@@ -1,5 +1,7 @@
 """Modal screen showing commit details for an author or repo."""
 
+import webbrowser
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import ModalScreen
@@ -58,12 +60,13 @@ class CommitDetailModal(ModalScreen):
             label = "Author" if self._group_by == "author" else "Repo"
             yield Static(f"{label}: {self._value}", id="commit-modal-title")
             yield DataTable(id="commit-table", zebra_stripes=True)
-            yield Static("ESC to close", id="commit-modal-hint")
+            yield Static("Enter: open in browser  |  ESC: close", id="commit-modal-hint")
 
     def on_mount(self) -> None:
+        self._urls: list[str] = []
         table = self.query_one("#commit-table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("Date", "AI", "+", "-", "Message", "URL")
+        table.add_columns("Date", "AI", "+", "-", "Message")
 
         commits = self._db.query_commits_by(
             self._group_by, self._value, org=self._org
@@ -71,8 +74,9 @@ class CommitDetailModal(ModalScreen):
 
         for c in commits:
             ai = c["ai_tool"] or ""
-            url = f"https://github.com/{c['org']}/{c['repo']}/commit/{c['sha'][:8]}"
-            msg = (c["message"] or "").split("\n")[0][:60]
+            url = f"https://github.com/{c['org']}/{c['repo']}/commit/{c['sha']}"
+            self._urls.append(url)
+            msg = (c["message"] or "").split("\n")[0][:80]
             date = c["date"][:10] if c["date"] else ""
             table.add_row(
                 date,
@@ -80,5 +84,9 @@ class CommitDetailModal(ModalScreen):
                 str(c["additions"]),
                 str(c["deletions"]),
                 msg,
-                url,
             )
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Open the commit URL in the browser."""
+        if 0 <= event.cursor_row < len(self._urls):
+            webbrowser.open(self._urls[event.cursor_row])
