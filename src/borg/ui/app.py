@@ -348,7 +348,9 @@ class BorgApp(App):
 
     def on_select_changed(self, event: Select.Changed) -> None:
         sid = event.select.id
-        value = None if event.value is Select.BLANK else str(event.value)
+        raw = event.value
+        # Treat BLANK, None, and empty string all as "no filter"
+        value = None if raw is Select.BLANK or raw is None or raw == "" else str(raw)
         if sid == "org-select":
             self.org_filter = value
         elif sid == "repo-select":
