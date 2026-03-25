@@ -398,7 +398,7 @@ class GitHubFetcher:
 
         self._emit(FetchProgress(
             phase="enrich", org="",
-            message=f"Enriching {total_unenriched} commits...",
+            message=f"Retrieving additions/deletions for {total_unenriched} commits...",
         ))
 
         total_enriched = 0
@@ -439,7 +439,7 @@ class GitHubFetcher:
             self._emit(FetchProgress(
                 phase="enrich", org="",
                 current=total_enriched, total=total_unenriched,
-                message=f"Enriched {total_enriched}/{total_unenriched} commits",
+                message=f"Retrieved additions/deletions: {total_enriched}/{total_unenriched} commits",
             ))
 
         return total_enriched
@@ -483,7 +483,7 @@ class GitHubFetcher:
                 await self.fetch_repo_commits(org, repo, since)
 
         # Enrich all unenriched commits
-        self._emit(FetchProgress(phase="enrich", org="", message="Enriching commits"))
+        self._emit(FetchProgress(phase="enrich", org="", message="Retrieving additions/deletions for new commits..."))
         await self.enrich_commits()
 
         # Record completion
