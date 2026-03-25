@@ -9,9 +9,8 @@ from io import BytesIO
 
 import httpx
 
-# Grayscale thresholds for half-block rendering
-_DARK = 100   # below = dark
-_LIGHT = 155  # above = light
+# ASCII brightness ramp — more chars = smoother gradients
+_ASCII_RAMP = " .'`^\",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
 
 
 def _get_gh_token() -> str | None:
@@ -90,18 +89,19 @@ def fetch_avatar_url(emails: tuple[str, ...]) -> str | None:
 
 @lru_cache(maxsize=64)
 def image_to_ascii(url: str, width: int = 30, height: int = 15) -> str:
-    """Download an image and convert to half-block art.
+    """Download an image and convert to detailed ASCII art.
 
-    Uses Unicode half-block characters (▀▄█ ) to pack 2 vertical pixels
-    per character cell, doubling the effective vertical resolution.
+    Uses a 70-level brightness ramp for smooth gradients.
+    Characters are doubled horizontally to compensate for terminal
+    character aspect ratio (~2:1 height:width).
 
     Args:
         url: Image URL to download.
         width: Art width in characters.
-        height: Art height in character rows (each row = 2 pixels).
+        height: Art height in lines.
 
     Returns:
-        Multi-line string.
+        Multi-line ASCII art string.
     """
     try:
         resp = httpx.get(url, timeout=5.0)
@@ -111,44 +111,22 @@ def image_to_ascii(url: str, width: int = 30, height: int = 15) -> str:
         return _name_art("?")
 
     try:
-        from PIL import Image
+        from PIL import Image, ImageFilter
 
         img = Image.open(BytesIO(image_bytes)).convert("L")
-        # Double the pixel height since we pack 2 rows per character
-        pixel_h = height * 2
-        img = img.resize((width, pixel_h))
+        # Slightly sharpen for better detail at small sizes
+        img = img.filter(ImageFilter.SHARPEN)
+        img = img.resize((width, height))
         pixels = list(img.getdata())
 
-        def px(row: int, col: int) -> int:
-            if row >= pixel_h:
-                return 255  # treat out-of-bounds as white
-            return pixels[row * width + col]
-
+        ramp_len = len(_ASCII_RAMP)
         lines = []
-        for row in range(0, pixel_h, 2):
+        for row in range(height):
             line = ""
             for col in range(width):
-                top = px(row, col)
-                bot = px(row + 1, col)
-                top_dark = top < _DARK
-                bot_dark = bot < _DARK
-                top_light = top > _LIGHT
-                bot_light = bot > _LIGHT
-
-                if top_dark and bot_dark:
-                    line += "█"
-                elif top_dark and not bot_dark:
-                    line += "▀"
-                elif not top_dark and bot_dark:
-                    line += "▄"
-                elif top_light and bot_light:
-                    line += " "
-                elif top < bot:
-                    line += "▀"
-                elif top > bot:
-                    line += "▄"
-                else:
-                    line += "░"
+                pixel = 255 - pixels[row * width + col]  # invert: dark bg
+                idx = pixel * (ramp_len - 1) // 255
+                line += _ASCII_RAMP[idx]
             lines.append(line)
         return "\n".join(lines)
     except ImportError:
