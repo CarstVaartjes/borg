@@ -53,15 +53,7 @@ class AuthorsTab(Static):
             f"  {name}\n"
             f"  {ai} AI / {total} total ({pct})\n"
         )
-        self._set_avatar_text(header + "\n  Loading avatar...")
-        self._fetch_avatar(name, header)
-
-    @work(thread=True)
-    def _fetch_avatar(self, name: str, header: str) -> None:
-        """Fetch and render avatar in background thread."""
-        from borg.avatar import get_ascii_avatar
-
-        # Get emails for this author
+        # Get emails on main thread (SQLite isn't thread-safe)
         try:
             emails = self.db.conn.execute(
                 "SELECT DISTINCT email FROM _author_identity WHERE canonical_name = ?",
@@ -69,9 +61,17 @@ class AuthorsTab(Static):
             ).fetchall()
             email_list = [r["email"] for r in emails]
         except Exception:
-            email_list = [name]
+            email_list = []
 
-        ascii_art = get_ascii_avatar(email_list, width=28, height=14)
+        self._set_avatar_text(header + "\n  Loading avatar...")
+        self._fetch_avatar(header, tuple(email_list))
+
+    @work(thread=True)
+    def _fetch_avatar(self, header: str, emails: tuple[str, ...]) -> None:
+        """Fetch and render avatar in background thread."""
+        from borg.avatar import get_ascii_avatar
+
+        ascii_art = get_ascii_avatar(list(emails), width=28, height=14)
         text = header + "\n" + ascii_art
         self.app.call_from_thread(self._set_avatar_text, text)
 
