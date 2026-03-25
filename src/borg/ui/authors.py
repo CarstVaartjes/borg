@@ -116,9 +116,9 @@ class AuthorsTab(Static):
             hour_counts[hr["hour"]] = hr["cnt"]
 
         # Build text: name first, then avatar, then stats below
-        prefix = "⭐ Skynet Employee of the Month\n\n" if is_top else ""
         title = (
-            f"{prefix}⭐ {name}\n"
+            f"⭐ Skynet Employee of the Month\n\n"
+            f"  {name}\n"
             f"  {ai} AI / {total} total ({pct})\n"
         )
 
