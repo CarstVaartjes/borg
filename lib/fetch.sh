@@ -58,9 +58,10 @@ fetch_repo_commits() {
     # Per-repo bookmark or global default. The GitHub API 'since' param is
     # inclusive, so the last-seen commit will be re-fetched; INSERT OR IGNORE
     # deduplicates by SHA.
-    local since e_repo
+    local since e_org e_repo
+    e_org=$(sql_escape "$org")
     e_repo=$(sql_escape "$repo")
-    since=$(sqlite3 "$db" "SELECT last_commit_date FROM repo_sync WHERE repo = '$e_repo';" 2>/dev/null)
+    since=$(sqlite3 "$db" "SELECT last_commit_date FROM repo_sync WHERE org = '$e_org' AND repo = '$e_repo';" 2>/dev/null)
     if [[ -z "$since" ]]; then
         since="$global_since"
     fi
@@ -108,8 +109,8 @@ fetch_repo_commits() {
             e_message=$(sql_escape "$message")
 
             local changes
-            changes=$(sqlite3 "$db" "INSERT OR IGNORE INTO commits (sha, repo, author, email, date, message, fetched_at)
-                VALUES ('$sha', '$e_repo', '$e_author', '$e_email', '$date', '$e_message', '$fetched_at');
+            changes=$(sqlite3 "$db" "INSERT OR IGNORE INTO commits (sha, org, repo, author, email, date, message, fetched_at)
+                VALUES ('$sha', '$e_org', '$e_repo', '$e_author', '$e_email', '$date', '$e_message', '$fetched_at');
                 SELECT changes();")
             if [[ "$changes" =~ ^[0-9]+$ ]] && [[ "$changes" -gt 0 ]]; then
                 new_count=$((new_count + 1))
@@ -130,13 +131,13 @@ fetch_repo_commits() {
     # Update repo_sync with the latest commit date
     if [[ -n "$newest_date" ]]; then
         local total_count
-        total_count=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits WHERE repo = '$e_repo';")
-        sqlite3 "$db" "INSERT OR REPLACE INTO repo_sync (repo, last_commit_date, last_synced_at, commit_count)
-            VALUES ('$e_repo', '$newest_date', '$(utc_now)', $total_count);"
+        total_count=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits WHERE org = '$e_org' AND repo = '$e_repo';")
+        sqlite3 "$db" "INSERT OR REPLACE INTO repo_sync (org, repo, last_commit_date, last_synced_at, commit_count)
+            VALUES ('$e_org', '$e_repo', '$newest_date', '$(utc_now)', $total_count);"
     elif [[ "$new_count" -eq 0 ]]; then
         # Still update last_synced_at even if no new commits
-        sqlite3 "$db" "INSERT OR IGNORE INTO repo_sync (repo, last_commit_date, last_synced_at, commit_count)
-            VALUES ('$e_repo', NULL, '$(utc_now)', 0);"
+        sqlite3 "$db" "INSERT OR IGNORE INTO repo_sync (org, repo, last_commit_date, last_synced_at, commit_count)
+            VALUES ('$e_org', '$e_repo', NULL, '$(utc_now)', 0);"
     fi
 
     echo "$new_count"
@@ -147,7 +148,7 @@ fetch_repo_commits() {
 # ---------------------------------------------------------------------------
 
 enrich_commits() {
-    local db="$1" org="$2"
+    local db="$1"
     local total
     total=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits WHERE additions IS NULL;")
 
@@ -165,7 +166,7 @@ enrich_commits() {
     while true; do
         local batch
         batch=$(sqlite3 -separator '|' "$db" \
-            "SELECT sha, repo FROM commits WHERE additions IS NULL LIMIT 100;")
+            "SELECT sha, org, repo FROM commits WHERE additions IS NULL LIMIT 100;")
 
         if [[ -z "$batch" ]]; then
             break
@@ -181,7 +182,7 @@ enrich_commits() {
         fi
 
         local pids=()
-        while IFS='|' read -r sha repo; do
+        while IFS='|' read -r sha org repo; do
             [[ -z "$sha" ]] && continue
             (
                 local result
@@ -235,39 +236,64 @@ enrich_commits() {
 # ---------------------------------------------------------------------------
 
 fetch_commits() {
-    local db="$1" org="$2" since="$3"
+    local db="$1"
+    local org_filter="${2:-}"
+
+    # Resolve which orgs to fetch
+    local org_rows
+    if [[ -n "$org_filter" ]]; then
+        org_rows=$(db_org_get "$db" "$org_filter")
+        if [[ -z "$org_rows" ]]; then
+            echo "Error: org '$org_filter' not registered. Run 'borg org add $org_filter --since <date>' first." >&2
+            exit 1
+        fi
+    else
+        org_rows=$(db_org_get_all "$db")
+        if [[ -z "$org_rows" ]]; then
+            echo "Error: no orgs registered. Run 'borg org add <name> --since <date>' first." >&2
+            exit 1
+        fi
+    fi
 
     echo "Phase 1: Listing commits..."
-    local repos
-    repos=$(fetch_repo_list "$org") || {
-        echo "Error: failed to list repos for org '$org'. Check GitHub authentication and org name." >&2
-        exit 1
-    }
-    local repo_count
-    repo_count=$(echo "$repos" | grep -c . || true)
-    echo "Found $repo_count repos"
+    local grand_total_new=0
 
-    local i=0
-    while IFS= read -r repo; do
-        [[ -z "$repo" ]] && continue
-        i=$((i + 1))
-        local count
-        count=$(fetch_repo_commits "$db" "$org" "$repo" "$since")
-        if [[ "$count" -gt 0 ]]; then
-            printf "\r  [%d/%d] %-40s %d new commits\n" "$i" "$repo_count" "$repo" "$count" >&2
-        else
-            printf "\r  [%d/%d] %-40s                    \r" "$i" "$repo_count" "$repo" >&2
-        fi
-    done <<< "$repos"
-    echo "" >&2
+    while IFS='|' read -r org since; do
+        [[ -z "$org" ]] && continue
+        echo "--- Org: $org (since $since) ---"
+
+        local repos
+        repos=$(fetch_repo_list "$org") || {
+            echo "Error: failed to list repos for org '$org'. Check GitHub authentication and org name." >&2
+            continue
+        }
+        local repo_count
+        repo_count=$(echo "$repos" | grep -c . || true)
+        echo "Found $repo_count repos"
+
+        local i=0
+        while IFS= read -r repo; do
+            [[ -z "$repo" ]] && continue
+            i=$((i + 1))
+            local count
+            count=$(fetch_repo_commits "$db" "$org" "$repo" "$since")
+            if [[ "$count" -gt 0 ]]; then
+                printf "\r  [%d/%d] %-40s %d new commits\n" "$i" "$repo_count" "$repo" "$count" >&2
+                grand_total_new=$((grand_total_new + count))
+            else
+                printf "\r  [%d/%d] %-40s                    \r" "$i" "$repo_count" "$repo" >&2
+            fi
+        done <<< "$repos"
+        echo "" >&2
+    done <<< "$org_rows"
 
     local total unenriched
     total=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits;")
     unenriched=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits WHERE additions IS NULL;")
-    echo "Phase 1 complete. $total total commits, $unenriched need enrichment."
+    echo "Phase 1 complete. $total total commits ($grand_total_new new), $unenriched need enrichment."
 
     # Phase 2
-    enrich_commits "$db" "$org"
+    enrich_commits "$db"
 
     # Update last_run
     db_set_meta "$db" "last_run_at" "$(utc_now)"
