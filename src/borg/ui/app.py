@@ -25,26 +25,168 @@ class BorgApp(App):
     SUB_TITLE = "Resistance is futile"
 
     CSS = """
-    #org-bar {
-        height: 3;
-        padding: 0 1;
-        layout: horizontal;
+    /* ── Global theme ────────────────────────────────── */
+    Screen {
+        background: #0c0c1a;
     }
-    #org-bar Label {
-        width: auto;
-        padding: 1 1 0 0;
+    Header {
+        background: #1a1a2e;
+        color: #00ff88;
     }
-    #org-bar Select {
-        width: 1fr;
-        max-width: 30;
-    }
-    #loc-select {
-        max-width: 20;
+    Footer {
+        background: #1a1a2e;
     }
     TabbedContent {
         height: 1fr;
     }
-    /* Orgs tab layout */
+    TabPane {
+        padding: 1 1;
+    }
+    ContentSwitcher {
+        background: #0c0c1a;
+    }
+    DataTable {
+        background: #0f0f23;
+    }
+    DataTable > .datatable--header {
+        background: #1a1a2e;
+        color: #00ff88;
+        text-style: bold;
+    }
+    DataTable > .datatable--cursor {
+        background: #1a3a2e;
+        color: #ffffff;
+    }
+    Button {
+        margin: 0 1 0 0;
+    }
+    Button.-primary {
+        background: #00aa66;
+    }
+
+    /* ── Filter bar ──────────────────────────────────── */
+    #org-bar {
+        height: 3;
+        padding: 0 1;
+        layout: horizontal;
+        background: #12122a;
+        border-bottom: solid #1a3a2e;
+    }
+    #org-bar Label {
+        width: auto;
+        padding: 1 1 0 0;
+        color: #00ff88;
+        text-style: bold;
+    }
+    #org-bar Select {
+        width: 1fr;
+        max-width: 28;
+    }
+    #loc-select {
+        max-width: 20;
+    }
+
+    /* ── Authors tab ─────────────────────────────────── */
+    #authors-layout {
+        height: 1fr;
+    }
+    #authors-layout RankingTab {
+        width: 2fr;
+    }
+    #avatar-panel {
+        width: 65;
+        padding: 1 2;
+        border-left: solid #00ff88;
+        background: #0f0f23;
+        overflow-y: auto;
+        color: #00ff88;
+    }
+
+    /* ── Trends tab ──────────────────────────────────── */
+    #trend-toggle {
+        height: 3;
+    }
+    #trend-toggle Button {
+        width: auto;
+    }
+
+    /* ── Fetch tab ───────────────────────────────────── */
+    #fetch-buttons {
+        height: 3;
+        margin: 0 0 1 0;
+    }
+    #fetch-buttons Button {
+        width: auto;
+    }
+    #fetch-log {
+        height: 1fr;
+        background: #0a0a18;
+        border: solid #1a1a2e;
+        padding: 1;
+    }
+    #rules-title {
+        margin: 1 0 0 0;
+        text-style: bold;
+        color: #00ff88;
+    }
+    #rules-table {
+        max-height: 30%;
+    }
+
+    /* ── Export tab ───────────────────────────────────── */
+    ExportTab Input {
+        margin: 0 0 1 0;
+    }
+
+    /* ── Identity tab ────────────────────────────────── */
+    #identity-title {
+        text-style: bold;
+        color: #00ff88;
+    }
+    #identity-help {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+    #identity-table {
+        height: 1fr;
+        max-height: 40%;
+    }
+    #suggest-title {
+        text-style: bold;
+        color: #ffaa00;
+        margin: 1 0 0 0;
+    }
+    #suggest-table {
+        max-height: 25%;
+    }
+    #suggest-actions {
+        height: 3;
+    }
+    #suggest-actions Button {
+        width: auto;
+    }
+    #alias-form {
+        height: 3;
+        margin: 1 0;
+    }
+    #alias-form Input {
+        width: 1fr;
+    }
+    #alias-form Button {
+        width: auto;
+    }
+    #alias-actions {
+        height: 3;
+    }
+    #alias-actions Button {
+        width: auto;
+    }
+    #identity-result {
+        height: auto;
+        color: #ffaa00;
+    }
+
+    /* ── Orgs tab ────────────────────────────────────── */
     OrgsTab {
         height: 1fr;
     }
@@ -71,74 +213,6 @@ class BorgApp(App):
     #org-result {
         height: auto;
         color: $text-muted;
-    }
-    /* Fetch tab layout */
-    #fetch-buttons {
-        height: 3;
-        margin: 0 0 1 0;
-    }
-    #fetch-buttons Button {
-        width: auto;
-        margin: 0 1 0 0;
-    }
-    #fetch-log {
-        height: 1fr;
-    }
-    #rules-title {
-        margin: 1 0 0 0;
-        text-style: bold;
-    }
-    #rules-table {
-        max-height: 30%;
-    }
-    /* Authors tab layout */
-    #authors-layout {
-        height: 1fr;
-    }
-    #authors-layout RankingTab {
-        width: 2fr;
-    }
-    #avatar-panel {
-        width: 65;
-        padding: 1 2;
-        border-left: tall $accent;
-        overflow-y: auto;
-    }
-    /* Trends tab */
-    #trend-toggle {
-        height: 3;
-    }
-    #trend-toggle Button {
-        width: auto;
-        margin: 0 1 0 0;
-    }
-    /* Identity tab layout */
-    #identity-title {
-        text-style: bold;
-    }
-    #identity-help {
-        color: $text-muted;
-        margin-bottom: 1;
-    }
-    #identity-table {
-        height: 1fr;
-    }
-    #alias-form {
-        height: 3;
-        margin: 1 0;
-    }
-    #alias-form Input {
-        width: 1fr;
-    }
-    #alias-form Button {
-        width: auto;
-    }
-    #alias-actions {
-        height: 3;
-    }
-    #alias-actions Button {
-        width: auto;
-        margin: 0 1 0 0;
     }
     """
 
