@@ -9,32 +9,71 @@ source "$SCRIPT_DIR/lib/fetch.sh"
 source "$SCRIPT_DIR/lib/detect.sh"
 source "$SCRIPT_DIR/lib/report.sh"
 
+# ---------------------------------------------------------------------------
+# Usage
+# ---------------------------------------------------------------------------
+
 usage() {
     cat <<EOF
 borg — AI commit adoption tracker
 "Resistance is futile"
 
 Usage:
-  borg fetch  --org <org> [--since <date>] [--db <path>]
-  borg report [--top <n>] [--db <path>]
-  borg export [--csv <path>] [--db <path>]
-  borg status [--db <path>]
+  borg org add <name> [--since <date>]   Register a GitHub org (default: 90 days ago)
+  borg org remove <name> [--force]       Unregister org and delete its data
+  borg org list                          Show registered orgs
+
+  borg fetch  [--org <name>] [--db <path>]
+  borg report [--org <name>] [--top <n>] [--db <path>]
+  borg export [--org <name>] [--csv <path>] [--db <path>]
+  borg status [--org <name>] [--db <path>]
 
 Commands:
-  fetch    Fetch commits from GitHub org (incremental, rate-limit aware)
+  org      Manage tracked GitHub organisations
+  fetch    Fetch commits from GitHub (incremental, rate-limit aware)
   report   Show AI adoption report with rankings and trends
   export   Export database to CSV
   status   Show sync status
 
 Options:
-  --org    GitHub organization (required on first fetch, remembered after)
-  --since  Floor date YYYY-MM-DD (required on first fetch, remembered after)
+  --org    Filter by a single org (optional; omit for all orgs)
+  --since  Floor date YYYY-MM-DD (only for org add; default: 90 days ago)
   --top    Number of entries in rankings (default: 10)
   --db     Database path (default: <script_dir>/data/tracker.db)
   --csv    CSV output path (default: stdout)
+  --force  Skip confirmation on org remove
 EOF
     exit 1
 }
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+default_since_date() {
+    # 90 days ago in YYYY-MM-DD
+    if date -u -v-90d +%Y-%m-%d >/dev/null 2>&1; then
+        date -u -v-90d +%Y-%m-%d   # macOS
+    else
+        date -u -d '90 days ago' +%Y-%m-%d  # Linux
+    fi
+}
+
+confirm_remove() {
+    local name="$1"
+    if command -v gum &>/dev/null; then
+        gum confirm "Remove org '$name' and all its data?" || return 1
+    else
+        printf "Remove org '%s' and all its data? [y/N] " "$name" >&2
+        local answer
+        read -r answer
+        [[ "$answer" =~ ^[Yy]$ ]] || return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 if [[ $# -eq 0 ]]; then
     usage
@@ -43,9 +82,110 @@ fi
 COMMAND="$1"
 shift
 
+# ---------------------------------------------------------------------------
+# org subcommand
+# ---------------------------------------------------------------------------
+
+if [[ "$COMMAND" == "org" ]]; then
+    if [[ $# -eq 0 ]]; then
+        echo "Error: missing org subcommand (add|remove|list)" >&2
+        exit 1
+    fi
+
+    SUBCMD="$1"
+    shift
+
+    DB="$DEFAULT_DB"
+    ORG_NAME=""
+    SINCE=""
+    FORCE=false
+
+    case "$SUBCMD" in
+        add)
+            # First positional arg is org name
+            if [[ $# -ge 1 && ! "$1" =~ ^-- ]]; then
+                ORG_NAME="$1"; shift
+            fi
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --since)
+                        [[ $# -ge 2 ]] || { echo "Error: --since requires a value" >&2; exit 1; }
+                        SINCE="$2"; shift 2 ;;
+                    --db)
+                        [[ $# -ge 2 ]] || { echo "Error: --db requires a value" >&2; exit 1; }
+                        DB="$2"; shift 2 ;;
+                    *)
+                        echo "Error: unknown option for org add: $1" >&2; exit 1 ;;
+                esac
+            done
+            if [[ -z "$ORG_NAME" ]]; then
+                echo "Error: org name required. Usage: borg org add <name> [--since <date>]" >&2
+                exit 1
+            fi
+            if [[ -z "$SINCE" ]]; then
+                SINCE=$(default_since_date)
+            fi
+            # Validate --since format
+            if ! [[ "$SINCE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+                echo "Error: --since must be in YYYY-MM-DD format" >&2
+                exit 1
+            fi
+            db_init "$DB"
+            db_org_add "$DB" "$ORG_NAME" "$SINCE"
+            ;;
+        remove)
+            # First positional arg is org name
+            if [[ $# -ge 1 && ! "$1" =~ ^-- ]]; then
+                ORG_NAME="$1"; shift
+            fi
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --force)
+                        FORCE=true; shift ;;
+                    --db)
+                        [[ $# -ge 2 ]] || { echo "Error: --db requires a value" >&2; exit 1; }
+                        DB="$2"; shift 2 ;;
+                    *)
+                        echo "Error: unknown option for org remove: $1" >&2; exit 1 ;;
+                esac
+            done
+            if [[ -z "$ORG_NAME" ]]; then
+                echo "Error: org name required. Usage: borg org remove <name> [--force]" >&2
+                exit 1
+            fi
+            db_init "$DB"
+            if [[ "$FORCE" != true ]]; then
+                confirm_remove "$ORG_NAME" || { echo "Aborted." >&2; exit 1; }
+            fi
+            db_org_remove "$DB" "$ORG_NAME"
+            ;;
+        list)
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --db)
+                        [[ $# -ge 2 ]] || { echo "Error: --db requires a value" >&2; exit 1; }
+                        DB="$2"; shift 2 ;;
+                    *)
+                        echo "Error: unknown option for org list: $1" >&2; exit 1 ;;
+                esac
+            done
+            db_init "$DB"
+            db_org_list "$DB"
+            ;;
+        *)
+            echo "Error: unknown org subcommand: $SUBCMD (expected add|remove|list)" >&2
+            exit 1
+            ;;
+    esac
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Standard commands: fetch, report, export, status
+# ---------------------------------------------------------------------------
+
 DB="$DEFAULT_DB"
 ORG=""
-SINCE=""
 TOP=10
 CSV=""
 
@@ -54,9 +194,6 @@ while [[ $# -gt 0 ]]; do
         --org)
             [[ $# -ge 2 ]] || { echo "Error: --org requires a value" >&2; exit 1; }
             ORG="$2"; shift 2 ;;
-        --since)
-            [[ $# -ge 2 ]] || { echo "Error: --since requires a value" >&2; exit 1; }
-            SINCE="$2"; shift 2 ;;
         --top)
             [[ $# -ge 2 ]] || { echo "Error: --top requires a value" >&2; exit 1; }
             TOP="$2"; shift 2 ;;
@@ -67,7 +204,7 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || { echo "Error: --csv requires a value" >&2; exit 1; }
             CSV="$2"; shift 2 ;;
         *)
-            echo "Unknown option: $1" >&2; usage ;;
+            echo "Error: unknown option: $1" >&2; exit 1 ;;
     esac
 done
 
@@ -77,56 +214,28 @@ if ! [[ "$TOP" =~ ^[0-9]+$ ]] || [[ "$TOP" -eq 0 ]]; then
     exit 1
 fi
 
-# Validate --since is YYYY-MM-DD if provided
-if [[ -n "$SINCE" ]] && ! [[ "$SINCE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-    echo "Error: --since must be in YYYY-MM-DD format" >&2
-    exit 1
-fi
-
 # Initialize database
 db_init "$DB"
 
-# Resolve org and since from sync_meta if not provided
-if [[ -z "$ORG" ]]; then
-    ORG=$(db_get_meta "$DB" "org")
-fi
-if [[ -z "$SINCE" ]]; then
-    SINCE=$(db_get_meta "$DB" "default_since")
-fi
-
 case "$COMMAND" in
     fetch)
-        if [[ -z "$ORG" ]]; then
-            echo "Error: --org required on first run" >&2
-            exit 1
-        fi
-        if [[ -z "$SINCE" ]]; then
-            echo "Error: --since required on first run (e.g. --since 2026-01-01)" >&2
-            exit 1
-        fi
-        db_set_meta "$DB" "org" "$ORG"
-        db_set_meta "$DB" "default_since" "$SINCE"
-        fetch_commits "$DB" "$ORG" "$SINCE"
+        fetch_commits "$DB" "$ORG"
         detect_ai "$DB"
         ;;
     report)
-        if [[ -z "$ORG" ]]; then
-            echo "Error: no data yet. Run 'borg fetch' first." >&2
-            exit 1
-        fi
-        report_show "$DB" "$ORG" "$SINCE" "$TOP"
+        report_show "$DB" "$ORG" "" "$TOP"
         ;;
     export)
         if [[ -z "$CSV" ]]; then
             CSV="/dev/stdout"
         fi
-        db_export_csv "$DB" "$CSV"
+        db_export_csv "$DB" "$CSV" "$ORG"
         ;;
     status)
-        db_show_status "$DB"
+        db_show_status "$DB" "$ORG"
         ;;
     *)
-        echo "Unknown command: $COMMAND" >&2
+        echo "Error: unknown command: $COMMAND" >&2
         usage
         ;;
 esac
