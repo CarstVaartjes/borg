@@ -40,6 +40,34 @@ class BorgApp(App):
     TabbedContent {
         height: 1fr;
     }
+    /* Orgs tab layout */
+    OrgsTab {
+        height: 1fr;
+    }
+    OrgsTab > Vertical {
+        height: 1fr;
+    }
+    #orgs-table {
+        height: 1fr;
+        max-height: 60%;
+    }
+    OrgsTab Horizontal {
+        height: 3;
+        margin: 1 0;
+    }
+    OrgsTab Horizontal Input {
+        width: 1fr;
+    }
+    OrgsTab Horizontal Button {
+        width: auto;
+    }
+    #remove-org-btn {
+        margin: 0 0 1 0;
+    }
+    #org-result {
+        height: auto;
+        color: $text-muted;
+    }
     """
 
     BINDINGS = [

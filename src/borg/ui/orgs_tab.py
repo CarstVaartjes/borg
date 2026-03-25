@@ -1,7 +1,5 @@
 """Orgs tab for managing tracked organizations."""
 
-from datetime import datetime, timedelta, timezone
-
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Input, Static
@@ -23,9 +21,7 @@ class OrgsTab(Static):
 
     def compose(self) -> ComposeResult:
         """Build orgs tab layout."""
-        default_since = (datetime.now(tz=timezone.utc) - timedelta(days=90)).strftime(
-            "%Y-%m-%d"
-        )
+        default_since = "2026-01-01"
 
         with Vertical():
             yield DataTable(id="orgs-table")

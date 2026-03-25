@@ -279,17 +279,31 @@ class Database:
 
         where, params = self._org_filter(org)
         direction = "ASC" if ascending else "DESC"
+
+        # For authors, group by email to merge aliases (different display names,
+        # same email). Pick the most frequently used name as display name.
+        if group_by == "author":
+            group_col = "email"
+            # Subquery to pick the most common author name per email
+            name_expr = (
+                "(SELECT c2.author FROM commits c2 WHERE c2.email = commits.email "
+                "GROUP BY c2.author ORDER BY COUNT(*) DESC LIMIT 1) AS author"
+            )
+        else:
+            group_col = group_by
+            name_expr = group_by
+
         rows = self.conn.execute(
             f"""
             SELECT
-                {group_by},
+                {name_expr},
                 COUNT(*) AS total_commits,
                 SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN 1 ELSE 0 END) AS ai_commits,
                 COALESCE(SUM(additions), 0) AS total_loc,
                 COALESCE(SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN additions ELSE 0 END), 0) AS ai_loc
             FROM commits
             WHERE {where}
-            GROUP BY {group_by}
+            GROUP BY {group_col}
             HAVING COUNT(*) >= ?
             ORDER BY {order_by} {direction}
             LIMIT ?
@@ -348,13 +362,14 @@ class Database:
         row = self.conn.execute(
             f"""
             SELECT
-                author,
+                (SELECT c2.author FROM commits c2 WHERE c2.email = commits.email
+                 GROUP BY c2.author ORDER BY COUNT(*) DESC LIMIT 1) AS author,
                 COUNT(*) AS ai_commits
             FROM commits
             WHERE ai_tool IS NOT NULL AND ai_tool != ''
               AND date >= date('now', '-7 days')
               AND {where}
-            GROUP BY author
+            GROUP BY email
             ORDER BY ai_commits DESC
             LIMIT 1
         """,
