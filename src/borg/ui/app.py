@@ -233,7 +233,7 @@ class BorgApp(App):
     author_filter: str | None = None
     month_filter: str | None = None
     week_filter: str | None = None
-    loc_mode: str = "both"
+    loc_mode: str = "added"
 
     def __init__(self, db_path: Path) -> None:
         super().__init__()
@@ -266,8 +266,8 @@ class BorgApp(App):
             yield Select([], prompt="All", allow_blank=True, id="week-select")
             yield Label("LOC:")
             yield Select(
-                [("Added + Deleted", "both"), ("Added only", "added")],
-                value="both",
+                [("Added only", "added"), ("Added + Deleted", "both")],
+                value="added",
                 allow_blank=False,
                 id="loc-select",
             )

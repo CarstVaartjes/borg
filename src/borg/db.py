@@ -20,7 +20,7 @@ class QueryFilters:
     author: str | None = None
     month: str | None = None  # "2026-03"
     week: str | None = None   # "2026-W12"
-    loc_mode: str = "both"    # "both" = additions+deletions, "added" = additions only
+    loc_mode: str = "added"   # "added" = additions only, "both" = additions+deletions
 
 
 class Database:

@@ -215,15 +215,15 @@ class TestReportQueries:
         result = seeded_db.query_summary()
         assert result["total_commits"] == 4
         assert result["ai_commits"] == 3
-        # Default LOC mode = both (additions + deletions)
-        assert result["total_loc"] == 465  # (100+20)+(50+10)+(30+5)+(200+50)
-        assert result["ai_loc"] == 430  # (100+20)+(50+10)+(200+50)
+        # Default LOC mode = added only
+        assert result["total_loc"] == 380  # 100+50+30+200
+        assert result["ai_loc"] == 350  # 100+50+200
 
     def test_query_summary_filtered(self, seeded_db: Database) -> None:
         result = seeded_db.query_summary(org="acme-corp")
         assert result["total_commits"] == 2
         assert result["ai_commits"] == 2
-        assert result["total_loc"] == 180  # (100+20)+(50+10)
+        assert result["total_loc"] == 150  # 100+50
 
     def test_query_by_tool(self, seeded_db: Database) -> None:
         result = seeded_db.query_by_tool()
