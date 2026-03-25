@@ -55,7 +55,7 @@ def fetch_avatar_url(emails: tuple[str, ...]) -> str | None:
                 if resp.status_code == 200:
                     avatar_url = resp.json().get("avatar_url")
                     if avatar_url:
-                        return avatar_url + "&s=64"
+                        return avatar_url + "&s=128"
             except Exception:
                 pass
 
@@ -74,7 +74,7 @@ def fetch_avatar_url(emails: tuple[str, ...]) -> str | None:
                     if items:
                         avatar_url = items[0].get("avatar_url")
                         if avatar_url:
-                            return avatar_url + "&s=64"
+                            return avatar_url + "&s=128"
             except Exception:
                 pass
 

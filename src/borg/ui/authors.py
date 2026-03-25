@@ -71,7 +71,7 @@ class AuthorsTab(Static):
         """Fetch and render avatar in background thread."""
         from borg.avatar import get_ascii_avatar
 
-        ascii_art = get_ascii_avatar(list(emails), width=28, height=14)
+        ascii_art = get_ascii_avatar(list(emails), width=56, height=28)
         text = header + "\n" + ascii_art
         self.app.call_from_thread(self._set_avatar_text, text)
 

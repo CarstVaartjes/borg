@@ -99,9 +99,10 @@ class BorgApp(App):
         width: 2fr;
     }
     #avatar-panel {
-        width: 35;
+        width: 65;
         padding: 1 2;
         border-left: tall $accent;
+        overflow-y: auto;
     }
     /* Trends tab */
     #trend-toggle {
