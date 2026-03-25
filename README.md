@@ -33,7 +33,7 @@ Track AI-generated code adoption across a GitHub organization. Fetches commit hi
 | `--org` | remembered after first run | GitHub organization |
 | `--since` | remembered after first run | Floor date (YYYY-MM-DD) |
 | `--top` | `10` | Number of entries in rankings |
-| `--db` | `./data/tracker.db` | Database path |
+| `--db` | `<script_dir>/data/tracker.db` | Database path |
 | `--csv` | stdout | CSV export path |
 
 ## How It Works
@@ -63,8 +63,8 @@ Detects AI-assisted commits by matching `Co-Authored-By` trailers in commit mess
 | Cursor | `Co-Authored-By:.*Cursor` | high |
 | Aider | `(aider)` in author name | high |
 | ChatGPT | `Co-Authored-By:.*(ChatGPT\|OpenAI)` | high |
-| Devin | `Co-Authored-By:.*Devin` or `devin-ai[bot]` | high |
-| Cody | `Co-Authored-By:.*Cody` | high |
+| Devin | `devin-ai[bot]` author/email or trailer | high |
+| Cody | `Co-Authored-By:.*Cody.*sourcegraph` or `noreply@sourcegraph.com` | high |
 | Amazon Q | `Co-Authored-By:.*Amazon Q` | high |
 | Windsurf | `Co-Authored-By:.*Windsurf` | high |
 | Codeium | `Co-Authored-By:.*Codeium` | high |
@@ -79,6 +79,7 @@ Shows:
 - Top/bottom N authors by AI commits and by AI LOC
 - Top/bottom N repos by AI commits and by AI LOC
 - Monthly trend with sparklines
+- Weekly trend with sparklines
 
 ### Rate Limit Handling
 

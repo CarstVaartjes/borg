@@ -30,21 +30,19 @@ Options:
   --org    GitHub organization (required on first fetch, remembered after)
   --since  Floor date YYYY-MM-DD (required on first fetch, remembered after)
   --top    Number of entries in rankings (default: 10)
-  --db     Database path (default: ./data/tracker.db)
+  --db     Database path (default: <script_dir>/data/tracker.db)
   --csv    CSV output path (default: stdout)
 EOF
     exit 1
 }
 
-# Parse command
-COMMAND="${1:-}"
-shift || true
-
-if [[ -z "$COMMAND" ]]; then
+if [[ $# -eq 0 ]]; then
     usage
 fi
 
-# Parse flags
+COMMAND="$1"
+shift
+
 DB="$DEFAULT_DB"
 ORG=""
 SINCE=""
@@ -53,14 +51,37 @@ CSV=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --org)   ORG="$2"; shift 2 ;;
-        --since) SINCE="$2"; shift 2 ;;
-        --top)   TOP="$2"; shift 2 ;;
-        --db)    DB="$2"; shift 2 ;;
-        --csv)   CSV="$2"; shift 2 ;;
-        *)       echo "Unknown option: $1"; usage ;;
+        --org)
+            [[ $# -ge 2 ]] || { echo "Error: --org requires a value" >&2; exit 1; }
+            ORG="$2"; shift 2 ;;
+        --since)
+            [[ $# -ge 2 ]] || { echo "Error: --since requires a value" >&2; exit 1; }
+            SINCE="$2"; shift 2 ;;
+        --top)
+            [[ $# -ge 2 ]] || { echo "Error: --top requires a value" >&2; exit 1; }
+            TOP="$2"; shift 2 ;;
+        --db)
+            [[ $# -ge 2 ]] || { echo "Error: --db requires a value" >&2; exit 1; }
+            DB="$2"; shift 2 ;;
+        --csv)
+            [[ $# -ge 2 ]] || { echo "Error: --csv requires a value" >&2; exit 1; }
+            CSV="$2"; shift 2 ;;
+        *)
+            echo "Unknown option: $1" >&2; usage ;;
     esac
 done
+
+# Validate --top is a positive integer
+if ! [[ "$TOP" =~ ^[0-9]+$ ]] || [[ "$TOP" -eq 0 ]]; then
+    echo "Error: --top must be a positive integer" >&2
+    exit 1
+fi
+
+# Validate --since is YYYY-MM-DD if provided
+if [[ -n "$SINCE" ]] && ! [[ "$SINCE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "Error: --since must be in YYYY-MM-DD format" >&2
+    exit 1
+fi
 
 # Initialize database
 db_init "$DB"
@@ -76,11 +97,11 @@ fi
 case "$COMMAND" in
     fetch)
         if [[ -z "$ORG" ]]; then
-            echo "Error: --org required on first run"
+            echo "Error: --org required on first run" >&2
             exit 1
         fi
         if [[ -z "$SINCE" ]]; then
-            echo "Error: --since required on first run (e.g. --since 2026-01-01)"
+            echo "Error: --since required on first run (e.g. --since 2026-01-01)" >&2
             exit 1
         fi
         db_set_meta "$DB" "org" "$ORG"
@@ -90,7 +111,7 @@ case "$COMMAND" in
         ;;
     report)
         if [[ -z "$ORG" ]]; then
-            echo "Error: no data yet. Run 'borg fetch' first."
+            echo "Error: no data yet. Run 'borg fetch' first." >&2
             exit 1
         fi
         report_show "$DB" "$ORG" "$SINCE" "$TOP"
@@ -105,7 +126,7 @@ case "$COMMAND" in
         db_show_status "$DB"
         ;;
     *)
-        echo "Unknown command: $COMMAND"
+        echo "Unknown command: $COMMAND" >&2
         usage
         ;;
 esac

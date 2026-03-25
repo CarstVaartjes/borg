@@ -5,6 +5,9 @@
 # Helpers
 # ---------------------------------------------------------------------------
 
+# SQL expression for total lines changed, used across queries
+LOC_EXPR="COALESCE(additions,0) + COALESCE(deletions,0)"
+
 format_number() {
     printf "%'d" "$1" 2>/dev/null || printf "%d" "$1"
 }
@@ -18,7 +21,6 @@ pct() {
     fi
 }
 
-# styled_box: render text inside a gum box, fall back to plain output
 styled_box() {
     local text="$1"
     if command -v gum &>/dev/null; then
@@ -69,7 +71,7 @@ print_ranking() {
 }
 
 # ---------------------------------------------------------------------------
-# Task 6: report_header + report_by_tool
+# Header and tool breakdown
 # ---------------------------------------------------------------------------
 
 report_header() {
@@ -79,8 +81,8 @@ report_header() {
 
     total_commits=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits;")
     ai_commits=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits WHERE ai_confidence = 'high';")
-    total_loc=$(sqlite3 "$db" "SELECT COALESCE(SUM(COALESCE(additions,0) + COALESCE(deletions,0)),0) FROM commits;")
-    ai_loc=$(sqlite3 "$db" "SELECT COALESCE(SUM(COALESCE(additions,0) + COALESCE(deletions,0)),0) FROM commits WHERE ai_confidence = 'high';")
+    total_loc=$(sqlite3 "$db" "SELECT COALESCE(SUM($LOC_EXPR),0) FROM commits;")
+    ai_loc=$(sqlite3 "$db" "SELECT COALESCE(SUM($LOC_EXPR),0) FROM commits WHERE ai_confidence = 'high';")
 
     local commit_pct loc_pct
     commit_pct=$(pct "$ai_commits" "$total_commits")
@@ -106,7 +108,7 @@ report_by_tool() {
 
     local rows
     rows=$(sqlite3 -separator '|' "$db" \
-        "SELECT ai_tool, COUNT(*), SUM(COALESCE(additions,0) + COALESCE(deletions,0))
+        "SELECT ai_tool, COUNT(*), SUM($LOC_EXPR)
          FROM commits
          WHERE ai_confidence = 'high'
          GROUP BY ai_tool
@@ -125,20 +127,23 @@ report_by_tool() {
 }
 
 # ---------------------------------------------------------------------------
-# Task 7: report_authors + report_repos
+# Rankings — parameterized for authors and repos
 # ---------------------------------------------------------------------------
 
-report_authors() {
-    local db="$1" top="$2"
+# Renders top/bottom rankings by AI commits and AI LOC
+# $1=db $2=top $3=group_col ("author" or "repo") $4=label ("Author" or "Repo")
+report_rankings() {
+    local db="$1" top="$2" group_col="$3" label="$4"
 
+    # Exclude entries with 5 or fewer commits to reduce noise
     local sql_base
-    sql_base="SELECT author,
+    sql_base="SELECT $group_col,
        SUM(CASE WHEN ai_confidence = 'high' THEN 1 ELSE 0 END) as ai_commits,
        COUNT(*) as total_commits,
-       SUM(CASE WHEN ai_confidence = 'high' THEN COALESCE(additions,0) + COALESCE(deletions,0) ELSE 0 END) as ai_loc,
-       SUM(COALESCE(additions,0) + COALESCE(deletions,0)) as total_loc
+       SUM(CASE WHEN ai_confidence = 'high' THEN $LOC_EXPR ELSE 0 END) as ai_loc,
+       SUM($LOC_EXPR) as total_loc
      FROM commits
-     GROUP BY author
+     GROUP BY $group_col
      HAVING COUNT(*) > 5"
 
     local top_by_commits bottom_by_commits top_by_loc bottom_by_loc
@@ -152,75 +157,47 @@ report_authors() {
     bottom_by_loc=$(sqlite3 -separator '|' "$db" \
         "$sql_base ORDER BY ai_loc ASC LIMIT $top;")
 
-    print_ranking "Top $top authors by AI commits:" "Author" "$top_by_commits"
-    print_ranking "Bottom $top authors by AI commits:" "Author" "$bottom_by_commits"
-    print_ranking "Top $top authors by AI LOC:" "Author" "$top_by_loc"
-    print_ranking "Bottom $top authors by AI LOC:" "Author" "$bottom_by_loc"
-}
-
-report_repos() {
-    local db="$1" top="$2"
-
-    local sql_base
-    sql_base="SELECT repo,
-       SUM(CASE WHEN ai_confidence = 'high' THEN 1 ELSE 0 END) as ai_commits,
-       COUNT(*) as total_commits,
-       SUM(CASE WHEN ai_confidence = 'high' THEN COALESCE(additions,0) + COALESCE(deletions,0) ELSE 0 END) as ai_loc,
-       SUM(COALESCE(additions,0) + COALESCE(deletions,0)) as total_loc
-     FROM commits
-     GROUP BY repo
-     HAVING COUNT(*) > 5"
-
-    local top_by_commits bottom_by_commits top_by_loc bottom_by_loc
-
-    top_by_commits=$(sqlite3 -separator '|' "$db" \
-        "$sql_base ORDER BY ai_commits DESC LIMIT $top;")
-    bottom_by_commits=$(sqlite3 -separator '|' "$db" \
-        "$sql_base ORDER BY ai_commits ASC LIMIT $top;")
-    top_by_loc=$(sqlite3 -separator '|' "$db" \
-        "$sql_base ORDER BY ai_loc DESC LIMIT $top;")
-    bottom_by_loc=$(sqlite3 -separator '|' "$db" \
-        "$sql_base ORDER BY ai_loc ASC LIMIT $top;")
-
-    print_ranking "Top $top repos by AI commits:" "Repo" "$top_by_commits"
-    print_ranking "Bottom $top repos by AI commits:" "Repo" "$bottom_by_commits"
-    print_ranking "Top $top repos by AI LOC:" "Repo" "$top_by_loc"
-    print_ranking "Bottom $top repos by AI LOC:" "Repo" "$bottom_by_loc"
+    print_ranking "Top $top ${label}s by AI commits:" "$label" "$top_by_commits"
+    print_ranking "Bottom $top ${label}s by AI commits:" "$label" "$bottom_by_commits"
+    print_ranking "Top $top ${label}s by AI LOC:" "$label" "$top_by_loc"
+    print_ranking "Bottom $top ${label}s by AI LOC:" "$label" "$bottom_by_loc"
 }
 
 # ---------------------------------------------------------------------------
-# Task 8: report_trend
+# Trend — parameterized for monthly and weekly
 # ---------------------------------------------------------------------------
 
-report_trend() {
-    local db="$1"
+# Renders a time-based trend report
+# $1=db $2=strftime_fmt $3=col_alias $4=section_title
+report_time_trend() {
+    local db="$1" strftime_fmt="$2" col_alias="$3" title="$4"
 
     local rows
     rows=$(sqlite3 -separator '|' "$db" \
-        "SELECT strftime('%Y-%m', date) as month,
+        "SELECT strftime('$strftime_fmt', date) as $col_alias,
                 COUNT(*) as total,
                 SUM(CASE WHEN ai_confidence = 'high' THEN 1 ELSE 0 END) as ai,
-                SUM(COALESCE(additions,0) + COALESCE(deletions,0)) as total_loc,
-                SUM(CASE WHEN ai_confidence = 'high' THEN COALESCE(additions,0) + COALESCE(deletions,0) ELSE 0 END) as ai_loc
+                SUM($LOC_EXPR) as total_loc,
+                SUM(CASE WHEN ai_confidence = 'high' THEN $LOC_EXPR ELSE 0 END) as ai_loc
          FROM commits
-         GROUP BY month
-         ORDER BY month;")
+         GROUP BY $col_alias
+         ORDER BY $col_alias;")
 
     [[ -z "$rows" ]] && return
 
-    section_header "Monthly trend:"
+    section_header "$title"
 
     local -a pcts=()
 
-    while IFS='|' read -r month total ai total_loc ai_loc; do
-        [[ -z "$month" ]] && continue
+    while IFS='|' read -r period total ai total_loc ai_loc; do
+        [[ -z "$period" ]] && continue
         local commit_pct loc_pct
         commit_pct=$(pct "$ai" "$total")
         loc_pct=$(pct "$ai_loc" "$total_loc")
         pcts+=("$commit_pct")
 
         printf "  %s  %7s/%7s  %3s%%  |  %12s/%12s LOC  %3s%%\n" \
-            "$month" \
+            "$period" \
             "$(format_number "$ai")" \
             "$(format_number "$total")" \
             "$commit_pct" \
@@ -229,56 +206,6 @@ report_trend() {
             "$loc_pct"
     done <<< "$rows"
 
-    # Sparkline
-    if [[ ${#pcts[@]} -gt 0 && -x "$SCRIPT_DIR/deps/spark" ]]; then
-        local sparkline
-        sparkline=$("$SCRIPT_DIR/deps/spark" "${pcts[@]}")
-        echo "  Trend: $sparkline"
-    fi
-}
-
-# ---------------------------------------------------------------------------
-# Weekly trend (ISO weeks)
-# ---------------------------------------------------------------------------
-
-report_weekly_trend() {
-    local db="$1"
-
-    local rows
-    rows=$(sqlite3 -separator '|' "$db" \
-        "SELECT strftime('%Y-W%W', date) as week,
-                COUNT(*) as total,
-                SUM(CASE WHEN ai_confidence = 'high' THEN 1 ELSE 0 END) as ai,
-                SUM(COALESCE(additions,0) + COALESCE(deletions,0)) as total_loc,
-                SUM(CASE WHEN ai_confidence = 'high' THEN COALESCE(additions,0) + COALESCE(deletions,0) ELSE 0 END) as ai_loc
-         FROM commits
-         GROUP BY week
-         ORDER BY week;")
-
-    [[ -z "$rows" ]] && return
-
-    section_header "Weekly trend (ISO weeks):"
-
-    local -a pcts=()
-
-    while IFS='|' read -r week total ai total_loc ai_loc; do
-        [[ -z "$week" ]] && continue
-        local commit_pct loc_pct
-        commit_pct=$(pct "$ai" "$total")
-        loc_pct=$(pct "$ai_loc" "$total_loc")
-        pcts+=("$commit_pct")
-
-        printf "  %s  %7s/%7s  %3s%%  |  %12s/%12s LOC  %3s%%\n" \
-            "$week" \
-            "$(format_number "$ai")" \
-            "$(format_number "$total")" \
-            "$commit_pct" \
-            "$(format_number "$ai_loc")" \
-            "$(format_number "$total_loc")" \
-            "$loc_pct"
-    done <<< "$rows"
-
-    # Sparkline
     if [[ ${#pcts[@]} -gt 0 && -x "$SCRIPT_DIR/deps/spark" ]]; then
         local sparkline
         sparkline=$("$SCRIPT_DIR/deps/spark" "${pcts[@]}")
@@ -294,9 +221,9 @@ report_show() {
     local db="$1" org="$2" since="$3" top="$4"
     report_header "$db" "$org" "$since"
     report_by_tool "$db"
-    report_authors "$db" "$top"
-    report_repos "$db" "$top"
-    report_trend "$db"
-    report_weekly_trend "$db"
+    report_rankings "$db" "$top" "author" "Author"
+    report_rankings "$db" "$top" "repo" "Repo"
+    report_time_trend "$db" '%Y-%m' "month" "Monthly trend:"
+    report_time_trend "$db" '%Y-W%W' "week" "Weekly trend:"
     echo ""
 }

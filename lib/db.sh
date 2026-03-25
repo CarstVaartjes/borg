@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
 # Database helpers for borg
 
+# Escape single quotes for SQLite string literals
+sql_escape() {
+    printf '%s' "${1//\'/\'\'}"
+}
+
 db_init() {
     local db="$1"
-    mkdir -p "$(dirname "$db")"
+    mkdir -p "$(dirname "$db")" || {
+        echo "Error: cannot create directory for database at $db" >&2
+        exit 1
+    }
 
     sqlite3 "$db" <<'SQL' >/dev/null
 PRAGMA journal_mode=WAL;
@@ -41,14 +49,26 @@ CREATE INDEX IF NOT EXISTS idx_commits_additions ON commits(additions);
 SQL
 }
 
+# Returns empty string if key not found or DB error (logs warning on error)
 db_get_meta() {
     local db="$1" key="$2"
-    sqlite3 "$db" "SELECT value FROM sync_meta WHERE key = '$key';" 2>/dev/null || echo ""
+    local e_key
+    e_key=$(sql_escape "$key")
+    local result
+    if ! result=$(sqlite3 "$db" "SELECT value FROM sync_meta WHERE key = '$e_key';" 2>&1); then
+        echo "Warning: could not read metadata key '$key': $result" >&2
+        echo ""
+        return
+    fi
+    echo "$result"
 }
 
 db_set_meta() {
     local db="$1" key="$2" value="$3"
-    sqlite3 "$db" "INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('$key', '$value');"
+    local e_key e_value
+    e_key=$(sql_escape "$key")
+    e_value=$(sql_escape "$value")
+    sqlite3 "$db" "INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('$e_key', '$e_value');"
 }
 
 db_export_csv() {
@@ -74,9 +94,12 @@ db_show_status() {
     echo ""
 
     local total enriched detected
-    total=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits;" 2>/dev/null || echo 0)
-    enriched=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits WHERE additions IS NOT NULL;" 2>/dev/null || echo 0)
-    detected=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits WHERE ai_tool IS NOT NULL;" 2>/dev/null || echo 0)
+    if ! total=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits;" 2>&1); then
+        echo "Error: could not query database: $total" >&2
+        return 1
+    fi
+    enriched=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits WHERE additions IS NOT NULL;")
+    detected=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits WHERE ai_tool IS NOT NULL;")
 
     echo "  Commits:     $total"
     echo "  Enriched:    $enriched / $total"
@@ -84,10 +107,10 @@ db_show_status() {
     echo ""
 
     local repo_count
-    repo_count=$(sqlite3 "$db" "SELECT COUNT(*) FROM repo_sync;" 2>/dev/null || echo 0)
+    repo_count=$(sqlite3 "$db" "SELECT COUNT(*) FROM repo_sync;")
     echo "  Repos synced: $repo_count"
     sqlite3 -separator '|' "$db" \
-        "SELECT repo, commit_count, last_commit_date FROM repo_sync ORDER BY commit_count DESC LIMIT 20;" 2>/dev/null | \
+        "SELECT repo, commit_count, last_commit_date FROM repo_sync ORDER BY commit_count DESC LIMIT 20;" | \
     while IFS='|' read -r repo count last_date; do
         printf "    %-35s %5d commits  (last: %s)\n" "$repo" "$count" "$last_date"
     done

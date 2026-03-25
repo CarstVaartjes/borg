@@ -5,13 +5,17 @@
 # Helpers
 # ---------------------------------------------------------------------------
 
-sql_escape() {
-    echo "${1//\'/\'\'}"
+utc_now() {
+    date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
 check_rate_limit() {
     local info
-    info=$(gh api rate_limit --jq '.rate | "\(.remaining) \(.reset)"' 2>/dev/null) || info="5000 0"
+    if ! info=$(gh api rate_limit --jq '.rate | "\(.remaining) \(.reset)"' 2>&1); then
+        echo "Warning: could not check GitHub rate limit: $info" >&2
+        echo "100 0"
+        return
+    fi
     echo "$info"
 }
 
@@ -33,7 +37,7 @@ wait_for_rate_limit() {
         wait_seconds=$(( reset_epoch - now + 5 ))
         if [[ "$wait_seconds" -lt 0 ]]; then wait_seconds=5; fi
         reset_human=$(date -r "$reset_epoch" "+%H:%M:%S %Z" 2>/dev/null || echo "soon")
-        echo "Rate limit hit. $remaining remaining. Waiting until $reset_human ($wait_seconds sec)..." >&2
+        echo "Rate limit low: $remaining remaining. Waiting until $reset_human ($wait_seconds sec)..." >&2
         sleep "$wait_seconds"
     done
 }
@@ -55,9 +59,12 @@ fetch_repo_list() {
 fetch_repo_commits() {
     local db="$1" org="$2" repo="$3" global_since="$4"
 
-    # Determine the since date: per-repo bookmark or global default
-    local since
-    since=$(sqlite3 "$db" "SELECT last_commit_date FROM repo_sync WHERE repo = '$(sql_escape "$repo")';" 2>/dev/null)
+    # Per-repo bookmark or global default. The GitHub API 'since' param is
+    # inclusive, so the last-seen commit will be re-fetched; INSERT OR IGNORE
+    # deduplicates by SHA.
+    local since e_repo
+    e_repo=$(sql_escape "$repo")
+    since=$(sqlite3 "$db" "SELECT last_commit_date FROM repo_sync WHERE repo = '$e_repo';" 2>/dev/null)
     if [[ -z "$since" ]]; then
         since="$global_since"
     fi
@@ -74,54 +81,49 @@ fetch_repo_commits() {
 
     while true; do
         local json
-        json=$(gh api "repos/$org/$repo/commits?since=$since_iso&per_page=100&page=$page" 2>/dev/null) || break
+        if ! json=$(gh api "repos/$org/$repo/commits?since=$since_iso&per_page=100&page=$page" 2>&1); then
+            echo "Warning: failed to fetch commits for $repo (page $page): $json" >&2
+            break
+        fi
 
-        # Check if we got an empty array
         local count
-        count=$(echo "$json" | jq 'length' 2>/dev/null) || break
+        if ! count=$(echo "$json" | jq 'length' 2>&1); then
+            echo "Warning: failed to parse response for $repo: $count" >&2
+            break
+        fi
         if [[ "$count" -eq 0 ]]; then
             break
         fi
 
-        # Parse and insert each commit
-        local entries
-        # Use JSON lines format to handle multi-line commit messages safely
-        local entry_count
-        entry_count=$(echo "$json" | jq 'length')
+        # Extract all fields per commit in a single jq call
+        local fetched_at
+        fetched_at=$(utc_now)
         local idx=0
-        while [[ "$idx" -lt "$entry_count" ]]; do
+        while [[ "$idx" -lt "$count" ]]; do
             local sha author email date message
-            sha=$(echo "$json" | jq -r ".[$idx].sha // \"\"")
-            author=$(echo "$json" | jq -r ".[$idx].commit.author.name // \"unknown\"")
-            email=$(echo "$json" | jq -r ".[$idx].commit.author.email // \"unknown\"")
-            date=$(echo "$json" | jq -r ".[$idx].commit.author.date // \"\"")
+            read -r sha author email date < <(echo "$json" | jq -r ".[$idx] | [.sha // \"\", .commit.author.name // \"unknown\", .commit.author.email // \"unknown\", .commit.author.date // \"\"] | @tsv")
             message=$(echo "$json" | jq -r ".[$idx].commit.message // \"\"")
             idx=$((idx + 1))
             [[ -z "$sha" ]] && continue
 
-            local e_author e_email e_message e_repo
+            local e_author e_email e_message
             e_author=$(sql_escape "$author")
             e_email=$(sql_escape "$email")
             e_message=$(sql_escape "$message")
-            e_repo=$(sql_escape "$repo")
-            local fetched_at
-            fetched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
             local changes
             changes=$(sqlite3 "$db" "INSERT OR IGNORE INTO commits (sha, repo, author, email, date, message, fetched_at)
                 VALUES ('$sha', '$e_repo', '$e_author', '$e_email', '$date', '$e_message', '$fetched_at');
                 SELECT changes();")
-            if [[ "$changes" -gt 0 ]]; then
+            if [[ "$changes" =~ ^[0-9]+$ ]] && [[ "$changes" -gt 0 ]]; then
                 new_count=$((new_count + 1))
             fi
 
-            # Track newest commit date
             if [[ -z "$newest_date" || "$date" > "$newest_date" ]]; then
                 newest_date="$date"
             fi
         done
 
-        # If fewer than 100 results, no more pages
         if [[ "$count" -lt 100 ]]; then
             break
         fi
@@ -131,18 +133,14 @@ fetch_repo_commits() {
 
     # Update repo_sync with the latest commit date
     if [[ -n "$newest_date" ]]; then
-        local e_repo
-        e_repo=$(sql_escape "$repo")
         local total_count
         total_count=$(sqlite3 "$db" "SELECT COUNT(*) FROM commits WHERE repo = '$e_repo';")
         sqlite3 "$db" "INSERT OR REPLACE INTO repo_sync (repo, last_commit_date, last_synced_at, commit_count)
-            VALUES ('$e_repo', '$newest_date', '$(date -u +%Y-%m-%dT%H:%M:%SZ)', $total_count);"
+            VALUES ('$e_repo', '$newest_date', '$(utc_now)', $total_count);"
     elif [[ "$new_count" -eq 0 ]]; then
         # Still update last_synced_at even if no new commits
-        local e_repo
-        e_repo=$(sql_escape "$repo")
         sqlite3 "$db" "INSERT OR IGNORE INTO repo_sync (repo, last_commit_date, last_synced_at, commit_count)
-            VALUES ('$e_repo', NULL, '$(date -u +%Y-%m-%dT%H:%M:%SZ)', 0);"
+            VALUES ('$e_repo', NULL, '$(utc_now)', 0);"
     fi
 
     echo "$new_count"
@@ -166,9 +164,9 @@ enrich_commits() {
     local done_count=0
     local tmpdir
     tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' EXIT INT TERM
 
     while true; do
-        # Get batch of unenriched commits
         local batch
         batch=$(sqlite3 -separator '|' "$db" \
             "SELECT sha, repo FROM commits WHERE additions IS NULL LIMIT 100;")
@@ -177,7 +175,8 @@ enrich_commits() {
             break
         fi
 
-        # Check rate limit and determine parallelism
+        # Adaptive parallelism: 8 concurrent when rate limit allows, 4 when low.
+        # Uses temp files for IPC since subshells cannot write to parent variables.
         local remaining
         remaining=$(wait_for_rate_limit 200)
         local parallel=8
@@ -185,43 +184,44 @@ enrich_commits() {
             parallel=4
         fi
 
-        # Fetch stats in parallel, write results to temp files
         local pids=()
         while IFS='|' read -r sha repo; do
             [[ -z "$sha" ]] && continue
             (
                 local result
-                result=$(gh api "repos/$org/$repo/commits/$sha" \
-                    --jq '"\(.stats.additions // 0)|\(.stats.deletions // 0)"' 2>/dev/null) || result="0|0"
-                echo "$sha|$result" > "$tmpdir/$sha"
+                if result=$(gh api "repos/$org/$repo/commits/$sha" \
+                    --jq '"\(.stats.additions // 0)|\(.stats.deletions // 0)"' 2>&1); then
+                    echo "$sha|$result" > "$tmpdir/$sha"
+                else
+                    echo "Warning: failed to enrich $sha in $repo: $result" >&2
+                    # No temp file = commit stays unenriched for retry
+                fi
             ) </dev/null &
             pids+=($!)
 
-            # Limit parallelism
             while [[ ${#pids[@]} -ge $parallel ]]; do
-                wait "${pids[0]}" 2>/dev/null || true
+                wait "${pids[0]}" || true
                 pids=("${pids[@]:1}")
             done
         done <<< "$batch"
 
-        # Wait for all remaining background jobs
         for pid in "${pids[@]}"; do
-            wait "$pid" 2>/dev/null || true
+            wait "$pid" || true
         done
 
-        # Batch update DB from temp files (sequential writes)
+        # Batch update DB from temp files
         for f in "$tmpdir"/*; do
             [[ -f "$f" ]] || continue
             local line sha additions deletions rest
-            line=$(cat "$f")
+            line=$(<"$f")
             sha="${line%%|*}"
             rest="${line#*|}"
             additions="${rest%%|*}"
             deletions="${rest##*|}"
 
-            # Sanitise: default to 0 if non-numeric
             [[ "$additions" =~ ^[0-9]+$ ]] || additions=0
             [[ "$deletions" =~ ^[0-9]+$ ]] || deletions=0
+            [[ "$sha" =~ ^[0-9a-f]+$ ]] || continue
 
             sqlite3 "$db" "UPDATE commits SET additions = $additions, deletions = $deletions WHERE sha = '$sha';"
             rm -f "$f"
@@ -230,7 +230,6 @@ enrich_commits() {
         done
     done
 
-    rm -rf "$tmpdir"
     echo "" >&2
     echo "Phase 2 complete. $done_count commits enriched."
 }
@@ -244,9 +243,12 @@ fetch_commits() {
 
     echo "Phase 1: Listing commits..."
     local repos
-    repos=$(fetch_repo_list "$org")
+    repos=$(fetch_repo_list "$org") || {
+        echo "Error: failed to list repos for org '$org'. Check GitHub authentication and org name." >&2
+        exit 1
+    }
     local repo_count
-    repo_count=$(echo "$repos" | wc -l | tr -d ' ')
+    repo_count=$(echo "$repos" | grep -c . || true)
     echo "Found $repo_count repos"
 
     local i=0
@@ -272,7 +274,7 @@ fetch_commits() {
     enrich_commits "$db" "$org"
 
     # Update last_run
-    sqlite3 "$db" "INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_run_at', '$(date -u +%Y-%m-%dT%H:%M:%SZ)');"
+    db_set_meta "$db" "last_run_at" "$(utc_now)"
 
     echo "Fetch complete."
 }
