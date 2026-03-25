@@ -136,8 +136,8 @@ def test_devin_bot_detected(tmp_db: Path) -> None:
     assert row["ai_tool"] == "devin"
 
 
-def test_claude_message_style_heuristic(tmp_db: Path) -> None:
-    """Detects Claude-style commit messages: summary + blank line + bullet points."""
+def test_ai_style_heuristic_bullets(tmp_db: Path) -> None:
+    """Detects AI-style commit messages: summary + blank line + bullet points."""
     db = Database(tmp_db)
     msg = (
         "AI-482: Split test infrastructure — shared tests use local source\n"
@@ -149,12 +149,28 @@ def test_claude_message_style_heuristic(tmp_db: Path) -> None:
     _insert_commit(db, "style1", msg, additions=50, deletions=20)
     detect_ai(db)
     row = db.conn.execute("SELECT ai_tool, ai_confidence FROM commits WHERE sha = 'style1'").fetchone()
-    assert row["ai_tool"] == "claude"
+    assert row["ai_tool"] == "ai-assisted"
     assert row["ai_confidence"] == "medium"
 
 
-def test_claude_style_not_triggered_on_short_messages(tmp_db: Path) -> None:
-    """Short messages with bullets should not trigger the heuristic."""
+def test_ai_style_heuristic_prose(tmp_db: Path) -> None:
+    """Detects AI-style commit messages: summary + blank line + descriptive paragraph."""
+    db = Database(tmp_db)
+    msg = (
+        "Simplify marketplace.json and fix plugin source paths\n"
+        "\n"
+        "Remove redundant metadata fields (version, author, keywords, category) "
+        "and correct source paths to include cowork-plugins/ prefix."
+    )
+    _insert_commit(db, "prose1", msg, additions=30, deletions=15)
+    detect_ai(db)
+    row = db.conn.execute("SELECT ai_tool, ai_confidence FROM commits WHERE sha = 'prose1'").fetchone()
+    assert row["ai_tool"] == "ai-assisted"
+    assert row["ai_confidence"] == "medium"
+
+
+def test_ai_style_not_triggered_on_short_messages(tmp_db: Path) -> None:
+    """Short messages should not trigger the heuristic."""
     db = Database(tmp_db)
     _insert_commit(db, "short1", "fix\n\n- item1\n- item2", additions=5, deletions=2)
     detect_ai(db)
@@ -162,13 +178,27 @@ def test_claude_style_not_triggered_on_short_messages(tmp_db: Path) -> None:
     assert row["ai_tool"] is None
 
 
-def test_claude_style_not_triggered_without_blank_line(tmp_db: Path) -> None:
-    """Bullets without a blank line separator should not match."""
+def test_ai_style_not_triggered_without_blank_line(tmp_db: Path) -> None:
+    """Body without a blank line separator should not match."""
     db = Database(tmp_db)
-    msg = "Some title that is long enough to pass the length check for this heuristic rule\n- item1\n- item2"
+    msg = "Some title that is long enough to pass the length check for this heuristic rule and detection\nThis continues without a blank line separator between title and body text"
     _insert_commit(db, "noblanc", msg, additions=50, deletions=20)
     detect_ai(db)
     row = db.conn.execute("SELECT ai_tool FROM commits WHERE sha = 'noblanc'").fetchone()
+    assert row["ai_tool"] is None
+
+
+def test_ai_style_not_triggered_on_merge_commits(tmp_db: Path) -> None:
+    """Merge commits should not trigger the heuristic."""
+    db = Database(tmp_db)
+    msg = (
+        "Merge pull request #123 from org/feature-branch\n"
+        "\n"
+        "This is a detailed merge commit description that is long enough to pass the length threshold."
+    )
+    _insert_commit(db, "merge1", msg, additions=100, deletions=50)
+    detect_ai(db)
+    row = db.conn.execute("SELECT ai_tool FROM commits WHERE sha = 'merge1'").fetchone()
     assert row["ai_tool"] is None
 
 

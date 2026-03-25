@@ -104,15 +104,18 @@ def detect_ai(db: Database) -> dict[str, int]:
                 (tool, confidence),
             )
 
-        # Claude message style heuristic: summary line + blank line + 2 or more
-        # bullet points starting with "- ". This is a very common Claude commit
-        # message pattern even without the Co-Authored-By trailer.
-        # The char(10) is \n in SQLite.
+        # AI message style heuristic: summary line + blank line + substantive body.
+        # AI tools (especially Claude) produce structured commit messages with a
+        # concise title, a blank line, then a detailed explanation (bullets or prose).
+        # Humans rarely write this pattern consistently.
+        # char(10) is \n in SQLite. We require the blank line separator and
+        # enough total length to filter out trivial two-line messages.
         conn.execute(
-            "UPDATE commits SET ai_tool = 'claude', ai_confidence = 'medium' "
+            "UPDATE commits SET ai_tool = 'ai-assisted', ai_confidence = 'medium' "
             "WHERE ai_tool IS NULL "
-            "AND message LIKE '%' || char(10) || char(10) || '- %' || char(10) || '- %' "
-            "AND length(message) > 80"
+            "AND message LIKE '%' || char(10) || char(10) || '_%' "
+            "AND length(message) > 100 "
+            "AND message NOT LIKE 'Merge %'"
         )
 
         # Bulk heuristic: large additions with few deletions.
