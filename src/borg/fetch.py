@@ -306,18 +306,12 @@ class GitHubFetcher:
         Returns:
             Tuple of (inserted_count, newest_commit_date).
         """
-        inserted = 0
-        newest_date: str | None = None
-        pr_count = 0
-
-        # Fetch all PRs (open + closed), sorted by recently updated.
-        # All PRs are included — merged, open, and abandoned — because
-        # this tracks development effort, not just production output.
+        # Step 1: Collect all PR metadata (lightweight — no commit data yet)
+        all_prs: list[dict] = []
         url: str | None = (
             f"{BASE_URL}/repos/{org}/{repo}/pulls?"
-            f"state=all&sort=updated&direction=desc&per_page=50"
+            f"state=all&sort=updated&direction=desc&per_page=100"
         )
-
         while url:
             try:
                 resp = await self._client.get(url)
@@ -327,61 +321,58 @@ class GitHubFetcher:
             prs = resp.json()
             if not prs:
                 break
-
-            found_old = False
             for pr in prs:
                 pr_date_str = pr.get("updated_at", "")
-                if not pr_date_str:
-                    continue
-
-                # Stop when we hit PRs older than our since date
-                if pr_date_str < since:
-                    found_old = True
+                if pr_date_str and pr_date_str < since:
                     break
+                all_prs.append(pr)
+            else:
+                # No break in for-loop — continue pagination
+                url = self._parse_next_url(resp.headers)
+                continue
+            # for-loop hit break (found old PR) — stop paginating
+            break
 
-                # Determine PR state and production status
-                merged_at = pr.get("merged_at")
-                pr_state_str = pr.get("state", "")
-                if merged_at:
-                    pr_state_val = "merged"
-                elif pr_state_str == "open":
-                    pr_state_val = "open"
-                else:
-                    pr_state_val = "closed"  # abandoned
+        pr_total = len(all_prs)
+        inserted = 0
+        newest_date: str | None = None
 
-                # A commit is in_production only if the PR merged into
-                # the default branch (main/master). PRs merged into
-                # intermediate branches (uat, preprod) are not production.
-                base_branch = pr.get("base", {}).get("ref", "")
-                is_production = bool(merged_at) and base_branch in ("main", "master")
+        # Step 2: Fetch commits for each PR
+        for i, pr in enumerate(all_prs, 1):
+            merged_at = pr.get("merged_at")
+            pr_state_str = pr.get("state", "")
+            if merged_at:
+                pr_state_val = "merged"
+            elif pr_state_str == "open":
+                pr_state_val = "open"
+            else:
+                pr_state_val = "closed"
 
-                # Fetch individual commits for this PR
-                pr_count += 1
-                pr_title = pr.get("title", "")[:50]
-                self._emit(FetchProgress(
-                    phase="commits", org=org, repo=repo,
-                    current=inserted,
-                    message=f"  PR {pr_count}: #{pr['number']} [{pr_state_val}] {pr_title} ({inserted} commits)",
-                ))
-                pr_url = f"{BASE_URL}/repos/{org}/{repo}/pulls/{pr['number']}/commits?per_page=100"
-                pr_inserted, pr_commit_date = await self._fetch_paginated_commits(
-                    pr_url, org, repo,
-                    in_production=is_production,
-                    pr_number=pr["number"],
-                    pr_state=pr_state_val,
-                )
-                inserted += pr_inserted
-                if pr_commit_date and (newest_date is None or pr_commit_date > newest_date):
-                    newest_date = pr_commit_date
+            base_branch = pr.get("base", {}).get("ref", "")
+            is_production = bool(merged_at) and base_branch in ("main", "master")
 
-            if found_old:
-                break
-            url = self._parse_next_url(resp.headers)
+            pr_title = pr.get("title", "")[:50]
+            self._emit(FetchProgress(
+                phase="commits", org=org, repo=repo,
+                current=i, total=pr_total,
+                message=f"  PR {i}/{pr_total}: #{pr['number']} [{pr_state_val}] {pr_title} ({inserted} commits)",
+            ))
+
+            pr_url = f"{BASE_URL}/repos/{org}/{repo}/pulls/{pr['number']}/commits?per_page=100"
+            pr_inserted, pr_commit_date = await self._fetch_paginated_commits(
+                pr_url, org, repo,
+                in_production=is_production,
+                pr_number=pr["number"],
+                pr_state=pr_state_val,
+            )
+            inserted += pr_inserted
+            if pr_commit_date and (newest_date is None or pr_commit_date > newest_date):
+                newest_date = pr_commit_date
 
         self._emit(FetchProgress(
             phase="commits", org=org, repo=repo,
             current=inserted,
-            message=f"  {repo}: {pr_count} PRs scanned, {inserted} commits",
+            message=f"  {repo}: {pr_total} PRs, {inserted} commits",
         ))
         return inserted, newest_date
 
