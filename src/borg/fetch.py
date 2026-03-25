@@ -395,9 +395,14 @@ class GitHubFetcher:
         Returns:
             Number of commits successfully enriched.
         """
-        # Count total unenriched upfront for progress
+        # Count enrichable commits (same filter as get_unenriched_commits)
         total_unenriched = self._db.conn.execute(
-            "SELECT COUNT(*) FROM commits WHERE additions IS NULL"
+            "SELECT COUNT(*) FROM commits "
+            "WHERE additions IS NULL "
+            "AND message NOT LIKE 'Merge %' "
+            "AND message NOT LIKE 'Revert %' "
+            "AND message NOT LIKE 'Resolve conflict%' "
+            "AND message NOT LIKE '%merge conflict%'"
         ).fetchone()[0]
         if total_unenriched == 0:
             return 0
