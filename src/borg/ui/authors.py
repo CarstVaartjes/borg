@@ -160,17 +160,38 @@ class AuthorsTab(Static):
         self._fetch_avatar(header, tuple(email_list))
 
     @staticmethod
-    def _bar_chart(title: str, labels: list[str], values: list[int]) -> str:
-        """Render a small horizontal bar chart."""
-        total = sum(values) or 1
+    def _bar_chart(title: str, labels: list[str], values: list[int], bar_height: int = 8) -> str:
+        """Render a horizontal bar chart using vertical bars."""
         max_val = max(values) or 1
-        bar_width = 20
+        total = sum(values) or 1
+
+        # Build columns: each column is bar_height chars tall
+        columns: list[list[str]] = []
+        for val in values:
+            fill = val * bar_height // max_val
+            col = [" "] * (bar_height - fill) + ["█"] * fill
+            columns.append(col)
+
         lines = [f"  {title}:"]
-        for label, val in zip(labels, values):
+        for row in range(bar_height):
+            line = "  "
+            for col in columns:
+                line += col[row] + " "
+            lines.append(line)
+
+        # Labels row
+        label_line = "  "
+        for label in labels:
+            label_line += label[:2].ljust(2)
+        lines.append(label_line)
+
+        # Percentage row
+        pct_line = "  "
+        for val in values:
             pct = val * 100 // total
-            fill = val * bar_width // max_val
-            bar = "█" * fill + "░" * (bar_width - fill)
-            lines.append(f"  {label:>2} {bar} {pct:>2}%")
+            pct_line += f"{pct:>2}"
+        lines.append(pct_line)
+
         return "\n".join(lines)
 
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
