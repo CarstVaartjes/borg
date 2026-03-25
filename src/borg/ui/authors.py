@@ -81,23 +81,8 @@ class AuthorsTab(Static):
             pass
 
     def _show_author_avatar(self, name: str) -> None:
-        """Show avatar for a specific author by name."""
-        # Look up stats for this author
-        rows = self.db.query_rankings(
-            group_by="author", limit=1, min_commits=0,
-            filters=QueryFilters(author=name),
-        )
-        if rows:
-            r = rows[0]
-            ai, total = r["ai_commits"], r["total_commits"]
-            pct = f"{ai / total * 100:.1f}%" if total > 0 else "0%"
-        else:
-            ai, total, pct = 0, 0, "0%"
-
-        header = (
-            f"⭐ {name}\n"
-            f"  {ai} AI / {total} total ({pct})\n"
-        )
+        """Show avatar and stats for a specific author."""
+        # Get emails for this author
         try:
             emails = self.db.conn.execute(
                 "SELECT DISTINCT email FROM _author_identity WHERE canonical_name = ?",
@@ -107,8 +92,86 @@ class AuthorsTab(Static):
         except Exception:
             email_list = []
 
+        if not email_list:
+            self._set_avatar_text(f"⭐ {name}\n  No data")
+            return
+
+        placeholders = ",".join("?" * len(email_list))
+
+        # Basic stats
+        row = self.db.conn.execute(
+            f"SELECT COUNT(*) as total, "
+            f"SUM(CASE WHEN ai_tool IS NOT NULL AND ai_tool != '' THEN 1 ELSE 0 END) as ai "
+            f"FROM commits WHERE commits.email IN ({placeholders})",
+            email_list,
+        ).fetchone()
+        total, ai = row["total"], row["ai"]
+        pct = f"{ai / total * 100:.1f}%" if total > 0 else "0%"
+
+        # Favourite repo
+        fav_repo = self.db.conn.execute(
+            f"SELECT repo, COUNT(*) as cnt FROM commits "
+            f"WHERE commits.email IN ({placeholders}) "
+            f"GROUP BY repo ORDER BY cnt DESC LIMIT 1",
+            email_list,
+        ).fetchone()
+        fav = fav_repo["repo"] if fav_repo else "—"
+
+        # Day of week distribution (0=Sun, 6=Sat)
+        day_rows = self.db.conn.execute(
+            f"SELECT CAST(strftime('%w', date) AS INTEGER) as dow, COUNT(*) as cnt "
+            f"FROM commits WHERE commits.email IN ({placeholders}) "
+            f"GROUP BY dow ORDER BY dow",
+            email_list,
+        ).fetchall()
+        day_counts = [0] * 7
+        for dr in day_rows:
+            day_counts[dr["dow"]] = dr["cnt"]
+
+        # Hour distribution
+        hour_rows = self.db.conn.execute(
+            f"SELECT CAST(strftime('%H', date) AS INTEGER) as hour, COUNT(*) as cnt "
+            f"FROM commits WHERE commits.email IN ({placeholders}) "
+            f"GROUP BY hour ORDER BY hour",
+            email_list,
+        ).fetchall()
+        hour_counts = [0] * 24
+        for hr in hour_rows:
+            hour_counts[hr["hour"]] = hr["cnt"]
+
+        # Build text
+        header = (
+            f"⭐ {name}\n"
+            f"  {ai} AI / {total} total ({pct})\n"
+            f"  Favourite repo: {fav}\n"
+        )
+        header += "\n" + self._bar_chart(
+            "Day", ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"],
+            [day_counts[1], day_counts[2], day_counts[3], day_counts[4],
+             day_counts[5], day_counts[6], day_counts[0]],
+        )
+        header += "\n" + self._bar_chart(
+            "Hour",
+            [str(h) for h in range(24)],
+            hour_counts,
+        )
+
         self._set_avatar_text(header + "\n  Loading avatar...")
         self._fetch_avatar(header, tuple(email_list))
+
+    @staticmethod
+    def _bar_chart(title: str, labels: list[str], values: list[int]) -> str:
+        """Render a small horizontal bar chart."""
+        total = sum(values) or 1
+        max_val = max(values) or 1
+        bar_width = 20
+        lines = [f"  {title}:"]
+        for label, val in zip(labels, values):
+            pct = val * 100 // total
+            fill = val * bar_width // max_val
+            bar = "█" * fill + "░" * (bar_width - fill)
+            lines.append(f"  {label:>2} {bar} {pct:>2}%")
+        return "\n".join(lines)
 
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
         self._ranking.on_data_table_header_selected(event)
