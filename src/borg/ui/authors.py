@@ -70,7 +70,7 @@ class AuthorsTab(Static):
         """Fetch and render avatar in background thread."""
         from borg.avatar import get_ascii_avatar
 
-        ascii_art = get_ascii_avatar(list(emails), width=28, height=14)
+        ascii_art = get_ascii_avatar(list(emails), width=56, height=28)
         text = header + "\n" + ascii_art
         self.app.call_from_thread(self._set_avatar_text, text)
 
@@ -80,12 +80,52 @@ class AuthorsTab(Static):
         except Exception:
             pass
 
+    def _show_author_avatar(self, name: str) -> None:
+        """Show avatar for a specific author by name."""
+        # Look up stats for this author
+        rows = self.db.query_rankings(
+            group_by="author", limit=1, min_commits=0,
+            filters=QueryFilters(author=name),
+        )
+        if rows:
+            r = rows[0]
+            ai, total = r["ai_commits"], r["total_commits"]
+            pct = f"{ai / total * 100:.1f}%" if total > 0 else "0%"
+        else:
+            ai, total, pct = 0, 0, "0%"
+
+        header = (
+            f"⭐ {name}\n"
+            f"  {ai} AI / {total} total ({pct})\n"
+        )
+        try:
+            emails = self.db.conn.execute(
+                "SELECT DISTINCT email FROM _author_identity WHERE canonical_name = ?",
+                (name,),
+            ).fetchall()
+            email_list = [r["email"] for r in emails]
+        except Exception:
+            email_list = []
+
+        self._set_avatar_text(header + "\n  Loading avatar...")
+        self._fetch_avatar(header, tuple(email_list))
+
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
-        # Delegate to ranking, then refresh avatar
         self._ranking.on_data_table_header_selected(event)
         self._update_avatar(self.app.query_filters)
 
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        """Update avatar when cursor moves to a different row."""
+        try:
+            table = self._ranking.query_one("#ranking-table", DataTable)
+            row = table.get_row_at(event.cursor_row)
+            name = str(row[0])
+            self._show_author_avatar(name)
+        except Exception:
+            pass
+
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Open commit detail modal on Enter."""
         table = self._ranking.query_one("#ranking-table", DataTable)
         row = table.get_row_at(event.cursor_row)
         name = str(row[0])
