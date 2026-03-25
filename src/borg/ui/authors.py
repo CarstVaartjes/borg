@@ -169,6 +169,7 @@ class AuthorsTab(Static):
             "should", "can", "will", "has", "had", "have", "did", "does",
             "its", "after", "before", "instead", "without", "about",
             "which", "where", "some", "other", "using", "used",
+            "claude", "copilot", "cursor", "aider", "openai", "opus",
         }
 
         counts: dict[str, int] = {}
