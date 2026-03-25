@@ -58,7 +58,8 @@ class AuthorsTab(Static):
 
     def _show_author_avatar(self, name: str, is_top: bool = False) -> None:
         """Show avatar and stats for a specific author."""
-        # Get emails for this author
+        # Get emails for this author — try identity table first, fall back to commits
+        email_list: list[str] = []
         try:
             emails = self.db.conn.execute(
                 "SELECT DISTINCT email FROM _author_identity WHERE canonical_name = ?",
@@ -66,7 +67,18 @@ class AuthorsTab(Static):
             ).fetchall()
             email_list = [r["email"] for r in emails]
         except Exception:
-            email_list = []
+            pass
+
+        if not email_list:
+            # Fall back: look up by author name or email directly in commits
+            try:
+                emails = self.db.conn.execute(
+                    "SELECT DISTINCT email FROM commits WHERE author = ? OR email = ?",
+                    (name, name),
+                ).fetchall()
+                email_list = [r["email"] for r in emails]
+            except Exception:
+                pass
 
         if not email_list:
             self._set_avatar_text(f"⭐ {name}\n  No data")

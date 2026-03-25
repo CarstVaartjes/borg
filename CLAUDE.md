@@ -9,9 +9,11 @@ Borg is a Python TUI (Textual) that tracks AI-generated code adoption across mul
 ## Running
 
 ```bash
-uv sync          # install dependencies
-uv run borg      # launch TUI
-uv run pytest -v # run tests (99 tests)
+uv sync                                      # install dependencies
+uv run borg                                  # launch TUI
+uv run pytest -v                             # run tests (99 tests)
+cp demo/demo.db data/tracker.db              # use demo data (no GitHub needed)
+uv run python scripts/generate_demo_db.py    # regenerate demo DB
 ```
 
 ## Architecture
