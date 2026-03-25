@@ -37,19 +37,20 @@ def _extract_github_username(email: str) -> str | None:
 def fetch_avatar_url(emails: tuple[str, ...]) -> str | None:
     """Find a GitHub avatar URL from a list of emails.
 
-    Tries GitHub API first (from noreply emails), then falls back to Gravatar.
+    Tries: 1) GitHub username from noreply email, 2) GitHub search by email,
+    3) Gravatar fallback.
     """
     token = _get_gh_token()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
 
-    # Try GitHub username from noreply emails
+    # 1. Try GitHub username from noreply emails
     for email in emails:
         username = _extract_github_username(email)
         if username and token:
             try:
                 resp = httpx.get(
                     f"https://api.github.com/users/{username}",
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=5.0,
+                    headers=headers, timeout=5.0,
                 )
                 if resp.status_code == 200:
                     avatar_url = resp.json().get("avatar_url")
@@ -58,7 +59,26 @@ def fetch_avatar_url(emails: tuple[str, ...]) -> str | None:
             except Exception:
                 pass
 
-    # Fallback: Gravatar from first real email
+    # 2. Try GitHub search by email (finds users by their commit email)
+    if token:
+        for email in emails:
+            if "@" not in email or "noreply" in email:
+                continue
+            try:
+                resp = httpx.get(
+                    f"https://api.github.com/search/users?q={email}+in:email",
+                    headers=headers, timeout=5.0,
+                )
+                if resp.status_code == 200:
+                    items = resp.json().get("items", [])
+                    if items:
+                        avatar_url = items[0].get("avatar_url")
+                        if avatar_url:
+                            return avatar_url + "&s=64"
+            except Exception:
+                pass
+
+    # 3. Gravatar fallback
     for email in emails:
         if "@" in email and "noreply" not in email:
             email_hash = hashlib.md5(email.strip().lower().encode()).hexdigest()
