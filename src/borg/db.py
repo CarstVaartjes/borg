@@ -536,6 +536,22 @@ class Database:
         ).fetchone()
         return row["last_commit_date"] if row else None
 
+    def get_repo_last_synced(self, org: str, repo: str) -> str | None:
+        """Get the timestamp of when this repo was last fetched.
+
+        Args:
+            org: Organization name.
+            repo: Repository name.
+
+        Returns:
+            Last synced timestamp, or None.
+        """
+        row = self.conn.execute(
+            "SELECT last_synced_at FROM repo_sync WHERE org = ? AND repo = ?",
+            (org, repo),
+        ).fetchone()
+        return row["last_synced_at"] if row else None
+
     def get_repo_commit_count(self, org: str, repo: str) -> int:
         """Get the total synced commit count for a repo.
 

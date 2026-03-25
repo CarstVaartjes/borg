@@ -271,13 +271,14 @@ class GitHubFetcher:
         Returns:
             Number of new commits inserted.
         """
-        bookmark = self._db.get_repo_bookmark(org, repo)
-        since_date = bookmark or since
+        # Use last_synced_at for incremental PR fetching — this is when we
+        # last ran, so we only look at PRs updated since then. Falls back to
+        # the org's floor date on first run.
+        last_synced = self._db.get_repo_last_synced(org, repo)
+        since_date = last_synced or since
 
-        # Fetch individual commits from merged PRs. This captures the original
-        # Co-Authored-By trailers that get stripped by squash merge. We skip
-        # default-branch commits entirely — in a squash-merge workflow they're
-        # just merge artifacts without trailers.
+        # Fetch individual commits from PRs. This captures the original
+        # Co-Authored-By trailers that get stripped by squash merge.
         self._emit(FetchProgress(
             phase="commits", org=org, repo=repo,
             message=f"Fetching {repo} PR commits...",
