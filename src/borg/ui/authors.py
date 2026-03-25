@@ -236,7 +236,8 @@ class AuthorsTab(Static):
         return "\n".join(lines)
 
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
-        self._ranking.on_data_table_header_selected(event)
+        # The event already bubbled to RankingTab which handled the sort toggle.
+        # We just need to update the avatar for the new #1.
         self._update_avatar(self.app.query_filters)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
