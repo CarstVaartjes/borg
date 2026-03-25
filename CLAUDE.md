@@ -4,63 +4,57 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Borg is a Bash CLI tool that tracks AI-generated code adoption across multiple GitHub organizations. It detects AI tool signatures in commit trailers (Co-Authored-By patterns), stores metadata in SQLite, and renders terminal reports with rankings and trends.
+Borg is a Python TUI (Textual) that tracks AI-generated code adoption across multiple GitHub organizations. It detects AI tool signatures in commit trailers, stores metadata in SQLite, and provides interactive charts and rankings.
 
 ## Running
 
 ```bash
-./borg org add <org> --since YYYY-MM-DD  # Register an org
-./borg org list                           # Show registered orgs
-./borg fetch [--org <name>]              # Fetch all orgs (or one)
-./borg report [--org <name>] [--top N]   # Terminal report
-./borg export [--org <name>] --csv out   # CSV export
-./borg status [--org <name>]             # Show sync metadata
+uv sync          # install dependencies
+uv run borg      # launch TUI
+uv run pytest -v # run tests
 ```
-
-No build step, no package manager, no test suite. Pure Bash.
-
-## Requirements
-
-- `gh` (GitHub CLI, must be authenticated)
-- `jq`
-- `sqlite3`
-- `gum` (optional, for styled terminal output and confirmations)
 
 ## Architecture
 
-Three-phase pipeline: **Fetch → Detect → Report**
-
 ```
-borg (CLI dispatcher)
-├── lib/db.sh       – SQLite layer (WAL mode, schema, org CRUD)
-├── lib/fetch.sh    – GitHub API fetching (two phases: list commits, then enrich with stats)
-├── lib/detect.sh   – AI tool detection via regex on commit messages (12 tools)
-├── lib/report.sh   – Terminal report rendering (rankings, trends, sparklines)
-└── deps/spark      – Vendored sparkline utility
+src/borg/
+├── cli.py          # Typer entry point → launches TUI
+├── db.py           # SQLite layer (Database class)
+├── detect.py       # AI detection (data-driven RULES list)
+├── fetch.py        # Async GitHub API fetcher (httpx)
+└── ui/
+    ├── app.py      # Textual App with 8-tab layout
+    ├── overview.py # Summary stats, Skynet Employee, tool chart
+    ├── rankings.py # Reusable sortable DataTable widget
+    ├── authors.py  # Authors ranking (thin wrapper)
+    ├── repos.py    # Repos ranking (thin wrapper)
+    ├── trends.py   # Plotext line charts (monthly + weekly)
+    ├── fetch_tab.py    # Fetch trigger + progress log
+    ├── detect_tab.py   # Detection rules + re-run
+    ├── export_tab.py   # CSV export
+    └── orgs_tab.py     # Org management (add/remove)
 ```
 
-**Data flow:** `fetch_commits()` → `enrich_commits()` → `detect_ai()` → `report_show()`
+**Data flow:** `GitHubFetcher.fetch_all()` → `detect_ai()` → report queries in UI tabs
 
-**Database:** SQLite in `data/tracker.db` with four tables:
-- `orgs` – registered organizations with floor dates
-- `commits` – commit metadata + AI detection results (org + repo per row)
-- `repo_sync` – per-org/repo sync bookmarks for incremental fetching (composite PK: org, repo)
-- `sync_meta` – key-value config (last run time)
+**Database:** SQLite with 4 tables:
+- `orgs` — registered organizations with floor dates
+- `commits` — commit metadata + AI detection (org + repo per row)
+- `repo_sync` — per-org/repo sync bookmarks (composite PK: org, repo)
+- `sync_meta` — key-value config
 
 ## Key Design Patterns
 
-- **Multi-org:** Orgs registered via `borg org add`, all commands support `--org` filter. `fetch` loops all orgs by default.
-- **Incremental sync:** Per-repo bookmarks in `repo_sync` allow resumable fetching; `INSERT OR IGNORE` ensures idempotency
-- **Rate limiting:** Adaptive parallelism (8 → 4 → wait) based on GitHub API rate limit headers
-- **AI detection:** Runs in a single transaction; resets + re-detects so rule changes apply retroactively. First-match-wins via `WHERE ai_tool IS NULL`
-- **Parallel enrichment:** Uses temp files + batch DB update to avoid concurrent SQLite write issues. Failed enrichments leave rows as NULL for retry on next run
-- **SQL safety:** `sql_escape()` in `db.sh` (shared across all modules) for string interpolation; input validation for `--top`, `--since` in CLI
-- **Error handling:** API failures log warnings to stderr instead of silently returning fake data
-- **Report filtering:** All queries use `WHERE $org_where` pattern (`1=1` for all, `org = '...'` for filtered)
+- **Parameterized queries** everywhere — no string interpolation for SQL
+- **`_org_filter(org)`** helper returns `(where_clause, params_tuple)` for optional org filtering
+- **Data-driven detection** — RULES list in detect.py, applied in transaction
+- **Async fetch** with httpx, progress callbacks for TUI integration
+- **Textual workers** for long-running fetch operations (@work decorator)
+- **Tab refresh on switch** — each tab's refresh_data(org) is called on activation
 
 ## Conventions
 
-- All scripts use `set -euo pipefail`
-- Functions follow `module_action` naming (e.g., `db_init`, `fetch_commits`, `detect_ai`)
-- Database path passed via `DB` variable (defaults to `data/tracker.db`)
-- Shared helpers (`sql_escape`, `utc_now`) live in `db.sh` since it's sourced first
+- Python 3.11+ type hints throughout
+- Tests in `tests/` with pytest, `tmp_db` fixture for temp databases
+- `uv sync` / `uv run` for all operations
+- UI widgets inherit from Static, take Database in constructor

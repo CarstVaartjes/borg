@@ -2,97 +2,83 @@
 
 > "Resistance is futile"
 
-Track AI-generated code adoption across GitHub organizations. Fetches commit history, detects AI-assisted commits via `Co-Authored-By` trailers, and renders terminal reports with rankings and trends.
+Track AI-generated code adoption across GitHub organizations. Interactive TUI with charts, rankings, and trend analysis.
 
-## Quick Start
+## Install
 
 ```bash
-# Register an org
-./borg org add myorg --since 2026-01-01
-
-# Fetch commits
-./borg fetch
-
-# View report
-./borg report
-
-# Add more orgs
-./borg org add anotherorg --since 2026-02-01
-
-# Fetch all orgs, or just one
-./borg fetch
-./borg fetch --org myorg
+# Requires Python 3.11+, uv, and gh CLI (authenticated)
+uv sync
+uv run borg
 ```
 
-## Commands
+Or install globally:
 
-| Command | Description |
-|---------|-------------|
-| `borg org add <name> [--since]` | Register a GitHub org (default: 90 days ago) |
-| `borg org remove <name> [--force]` | Unregister org and delete its data |
-| `borg org list` | Show registered organizations |
-| `borg fetch [--org]` | Fetch commits (all orgs, or one) |
-| `borg report [--org] [--top]` | Show AI adoption report with rankings and trends |
-| `borg export [--org] [--csv]` | Export database to CSV |
-| `borg status [--org]` | Show sync status |
+```bash
+uv tool install .
+borg
+```
 
-### Options
+## Usage
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--org` | all registered orgs | Filter to a specific organization |
-| `--since` | 90 days ago | Floor date YYYY-MM-DD (for `org add`) |
-| `--top` | `10` | Number of entries in rankings |
-| `--db` | `<script_dir>/data/tracker.db` | Database path |
-| `--csv` | stdout | CSV export path |
-| `--force` | | Skip confirmation on destructive operations |
+Launch the TUI:
 
-## How It Works
+```bash
+borg                          # uses default db (~/.local/share/borg/tracker.db)
+borg --db path/to/tracker.db  # custom db location
+```
 
-### Fetch (two phases)
+Everything happens inside the TUI — no subcommands needed.
 
-**Phase 1 — List commits** (cheap: ~1 API call per 100 commits)
-- Lists all non-archived repos in each registered org
-- Fetches commits since the last sync date (or `--since` from org registration)
-- Stores commit metadata in SQLite
+### Tabs
 
-**Phase 2 — Enrich with stats** (expensive: 1 API call per commit)
-- Fetches additions/deletions for each commit
-- Adaptive parallelism based on rate limit remaining
-- Auto-waits when rate limit is hit, resumes automatically
+| # | Tab | Description |
+|---|-----|-------------|
+| 1 | **Overview** | Assimilation Progress, Skynet Employee of the Week, tool chart |
+| 2 | **Authors** | Sortable ranking table by AI commits and LOC |
+| 3 | **Repos** | Sortable ranking table by AI commits and LOC |
+| 4 | **Trends** | Monthly and weekly AI adoption % line charts |
+| 5 | **Fetch** | Trigger GitHub fetch with real-time progress log |
+| 6 | **Detect** | View detection rules, re-run AI detection |
+| 7 | **Export** | Export data to CSV |
+| 8 | **Orgs** | Add/remove GitHub organizations |
 
-Both phases are **incremental and resumable**. If interrupted, re-running picks up where it left off.
+### Keyboard Shortcuts
 
-### AI Detection
+| Key | Action |
+|-----|--------|
+| `1-8` | Switch tabs |
+| `/` | Focus org filter |
+| `q` | Quit |
 
-Detects AI-assisted commits by matching `Co-Authored-By` trailers in commit messages. Runs locally — no API calls.
+### Getting Started
+
+1. Launch `borg`
+2. Go to **Orgs** tab (press `8`)
+3. Add a GitHub organization with a floor date
+4. Go to **Fetch** tab (press `5`) and click "Start Fetch"
+5. Explore results in Overview, Authors, Repos, and Trends tabs
+
+## AI Detection
+
+Detects AI-assisted commits by matching `Co-Authored-By` trailers in commit messages.
 
 | Tool | Detection Pattern | Confidence |
 |------|------------------|------------|
 | Claude | `Co-Authored-By:.*Claude` or `noreply@anthropic.com` | high |
 | Copilot | `Co-Authored-By:.*Copilot` or `copilot[bot]` author | high |
-| Cursor | `Co-Authored-By:.*Cursor` | high |
+| Cursor | `Co-Authored-By:.*Cursor` or `noreply@cursor.com` | high |
 | Aider | `(aider)` in author name | high |
 | ChatGPT | `Co-Authored-By:.*(ChatGPT\|OpenAI)` | high |
-| Devin | `devin-ai[bot]` author/email or trailer | high |
-| Cody | `Co-Authored-By:.*Cody.*sourcegraph` or `noreply@sourcegraph.com` | high |
+| Devin | `devin-ai[bot]` author/email | high |
+| Cody | `Co-Authored-By:.*Cody.*sourcegraph` | high |
 | Amazon Q | `Co-Authored-By:.*Amazon Q` | high |
 | Windsurf | `Co-Authored-By:.*Windsurf` | high |
 | Codeium | `Co-Authored-By:.*Codeium` | high |
 | Tabnine | `Co-Authored-By:.*Tabnine` | high |
 | Bulk addition | `additions > 100 AND deletions < 10` | low |
 
-### Report
-
-Shows (combined across all orgs, or filtered with `--org`):
-- Summary (total commits, AI-assisted count/percentage, LOC stats)
-- Breakdown by AI tool
-- Top/bottom N authors by AI commits and by AI LOC
-- Top/bottom N repos by AI commits and by AI LOC
-- Monthly trend with sparklines
-- Weekly trend with sparklines
-
-### Rate Limit Handling
+## Rate Limit Handling
 
 GitHub allows 5,000 API calls/hour. Borg monitors usage and adapts:
 
@@ -102,25 +88,19 @@ GitHub allows 5,000 API calls/hour. Borg monitors usage and adapts:
 | 200-500 | 4 parallel fetches |
 | < 200 | Auto-wait until reset, then resume |
 
-A single `borg fetch` always runs to completion, no matter how many commits.
-
 ## Requirements
 
-| Tool | Install |
-|------|---------|
-| `gh` | `brew install gh` (must be authenticated) |
-| `jq` | `brew install jq` |
-| `sqlite3` | Pre-installed on macOS |
-| `gum` | `brew install gum` (optional, for styled output) |
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/)
+- [gh](https://cli.github.com/) (GitHub CLI, authenticated)
 
-## Data Storage
+## Development
 
-All data is stored in a local SQLite database (`./data/tracker.db`). The database tracks:
-- Multiple GitHub organizations with per-org floor dates
-- All commits with full metadata and AI classification
-- Per-repo sync state for incremental fetching
-
-Export to CSV anytime: `./borg export --csv output.csv`
+```bash
+uv sync                    # install dependencies
+uv run pytest -v           # run tests
+uv run borg                # launch TUI
+```
 
 ## License
 
