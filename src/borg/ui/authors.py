@@ -122,22 +122,38 @@ class AuthorsTab(Static):
             f"  {ai} AI / {total} total ({pct})\n"
         )
 
-        stats = (
-            f"\n  Favourite repo: {fav}\n"
-        )
-        stats += "\n" + self._bar_chart(
+        day_chart = self._bar_chart(
             "Day", ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"],
             [day_counts[1], day_counts[2], day_counts[3], day_counts[4],
              day_counts[5], day_counts[6], day_counts[0]],
+            bar_height=5,
         )
-        stats += "\n" + self._bar_chart(
+        hour_chart = self._bar_chart(
             "Hour",
             [str(h) for h in range(24)],
             hour_counts,
+            bar_height=5,
         )
+
+        stats = f"\n  Favourite repo: {fav}\n\n"
+        stats += self._side_by_side(day_chart, hour_chart, gap=3)
 
         self._set_avatar_text(title + "\n  Loading avatar...")
         self._fetch_avatar(title, stats, tuple(email_list))
+
+    @staticmethod
+    def _side_by_side(left: str, right: str, gap: int = 3) -> str:
+        """Place two text blocks side by side."""
+        left_lines = left.split("\n")
+        right_lines = right.split("\n")
+        max_left = max((len(l) for l in left_lines), default=0)
+        height = max(len(left_lines), len(right_lines))
+        lines = []
+        for i in range(height):
+            l = left_lines[i] if i < len(left_lines) else ""
+            r = right_lines[i] if i < len(right_lines) else ""
+            lines.append(f"{l:<{max_left}}{' ' * gap}{r}")
+        return "\n".join(lines)
 
     @staticmethod
     def _bar_chart(title: str, labels: list[str], values: list[int], bar_height: int = 8) -> str:
@@ -164,13 +180,6 @@ class AuthorsTab(Static):
         for label in labels:
             label_line += label[:2].ljust(2)
         lines.append(label_line)
-
-        # Percentage row
-        pct_line = "  "
-        for val in values:
-            pct = val * 100 // total
-            pct_line += f"{pct:>2}"
-        lines.append(pct_line)
 
         return "\n".join(lines)
 
