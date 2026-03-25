@@ -388,51 +388,60 @@ class GitHubFetcher:
         Returns:
             Number of commits successfully enriched.
         """
-        remaining, _ = await self.check_rate_limit()
-        max_concurrent = 8 if remaining > 1000 else 4
-        sem = asyncio.Semaphore(max_concurrent)
-
-        commits = self._db.get_unenriched_commits(limit=100)
-        if not commits:
+        # Count total unenriched upfront for progress
+        total_unenriched = self._db.conn.execute(
+            "SELECT COUNT(*) FROM commits WHERE additions IS NULL"
+        ).fetchone()[0]
+        if total_unenriched == 0:
             return 0
 
-        enriched = 0
-        total = len(commits)
+        self._emit(FetchProgress(
+            phase="enrich", org="",
+            message=f"Enriching {total_unenriched} commits...",
+        ))
 
-        async def _enrich_one(commit: dict) -> bool:
-            async with sem:
-                try:
-                    url = f"{BASE_URL}/repos/{commit['org']}/{commit['repo']}/commits/{commit['sha']}"
-                    resp = await self._client.get(url)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    stats = data.get("stats", {})
-                    additions = stats.get("additions")
-                    deletions = stats.get("deletions")
-                    if additions is not None and deletions is not None:
-                        self._db.update_commit_stats(
-                            commit["sha"], additions, deletions
-                        )
-                        return True
-                except Exception:
-                    logger.warning("Failed to enrich commit %s", commit["sha"])
-                return False
+        total_enriched = 0
 
-        tasks = [_enrich_one(c) for c in commits]
-        results = await asyncio.gather(*tasks)
-        enriched = sum(1 for r in results if r)
+        # Process in batches of 100 until all done
+        while True:
+            commits = self._db.get_unenriched_commits(limit=100)
+            if not commits:
+                break
 
-        self._emit(
-            FetchProgress(
-                phase="enrich",
-                org="",
-                current=enriched,
-                total=total,
-                message=f"Enriched {enriched}/{total} commits",
-            )
-        )
+            remaining, _ = await self.check_rate_limit()
+            max_concurrent = 8 if remaining > 1000 else 4
+            sem = asyncio.Semaphore(max_concurrent)
 
-        return enriched
+            async def _enrich_one(commit: dict) -> bool:
+                async with sem:
+                    try:
+                        url = f"{BASE_URL}/repos/{commit['org']}/{commit['repo']}/commits/{commit['sha']}"
+                        resp = await self._client.get(url)
+                        resp.raise_for_status()
+                        data = resp.json()
+                        stats = data.get("stats", {})
+                        additions = stats.get("additions")
+                        deletions = stats.get("deletions")
+                        if additions is not None and deletions is not None:
+                            self._db.update_commit_stats(
+                                commit["sha"], additions, deletions
+                            )
+                            return True
+                    except Exception:
+                        logger.warning("Failed to enrich commit %s", commit["sha"])
+                    return False
+
+            results = await asyncio.gather(*[_enrich_one(c) for c in commits])
+            batch_enriched = sum(1 for r in results if r)
+            total_enriched += batch_enriched
+
+            self._emit(FetchProgress(
+                phase="enrich", org="",
+                current=total_enriched, total=total_unenriched,
+                message=f"Enriched {total_enriched}/{total_unenriched} commits",
+            ))
+
+        return total_enriched
 
     async def fetch_all(self, org_filter: str | None = None) -> None:
         """Run a full fetch cycle: repos, commits, enrichment.
