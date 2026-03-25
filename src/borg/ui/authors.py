@@ -39,39 +39,15 @@ class AuthorsTab(Static):
         if not rows:
             self._set_avatar_text("No data")
             return
-
-        top = rows[0]
-        name = top["author"]
-        ai = top["ai_commits"]
-        total = top["total_commits"]
-        pct = f"{ai / total * 100:.1f}%" if total > 0 else "0%"
-
-        header = (
-            f"⭐ Skynet Employee of the Month\n"
-            f"\n"
-            f"  {name}\n"
-            f"  {ai} AI / {total} total ({pct})\n"
-        )
-        # Get emails on main thread (SQLite isn't thread-safe)
-        try:
-            emails = self.db.conn.execute(
-                "SELECT DISTINCT email FROM _author_identity WHERE canonical_name = ?",
-                (name,),
-            ).fetchall()
-            email_list = [r["email"] for r in emails]
-        except Exception:
-            email_list = []
-
-        self._set_avatar_text(header + "\n  Loading avatar...")
-        self._fetch_avatar(header, tuple(email_list))
+        self._show_author_avatar(rows[0]["author"], is_top=True)
 
     @work(thread=True)
-    def _fetch_avatar(self, header: str, emails: tuple[str, ...]) -> None:
+    def _fetch_avatar(self, title: str, stats: str, emails: tuple[str, ...]) -> None:
         """Fetch and render avatar in background thread."""
         from borg.avatar import get_ascii_avatar
 
         ascii_art = get_ascii_avatar(list(emails), width=56, height=28)
-        text = header + "\n" + ascii_art
+        text = title + "\n" + ascii_art + "\n" + stats
         self.app.call_from_thread(self._set_avatar_text, text)
 
     def _set_avatar_text(self, text: str) -> None:
@@ -80,7 +56,7 @@ class AuthorsTab(Static):
         except Exception:
             pass
 
-    def _show_author_avatar(self, name: str) -> None:
+    def _show_author_avatar(self, name: str, is_top: bool = False) -> None:
         """Show avatar and stats for a specific author."""
         # Get emails for this author
         try:
@@ -139,25 +115,29 @@ class AuthorsTab(Static):
         for hr in hour_rows:
             hour_counts[hr["hour"]] = hr["cnt"]
 
-        # Build text
-        header = (
-            f"⭐ {name}\n"
+        # Build text: name first, then avatar, then stats below
+        prefix = "⭐ Skynet Employee of the Month\n\n" if is_top else ""
+        title = (
+            f"{prefix}⭐ {name}\n"
             f"  {ai} AI / {total} total ({pct})\n"
-            f"  Favourite repo: {fav}\n"
         )
-        header += "\n" + self._bar_chart(
+
+        stats = (
+            f"\n  Favourite repo: {fav}\n"
+        )
+        stats += "\n" + self._bar_chart(
             "Day", ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"],
             [day_counts[1], day_counts[2], day_counts[3], day_counts[4],
              day_counts[5], day_counts[6], day_counts[0]],
         )
-        header += "\n" + self._bar_chart(
+        stats += "\n" + self._bar_chart(
             "Hour",
             [str(h) for h in range(24)],
             hour_counts,
         )
 
-        self._set_avatar_text(header + "\n  Loading avatar...")
-        self._fetch_avatar(header, tuple(email_list))
+        self._set_avatar_text(title + "\n  Loading avatar...")
+        self._fetch_avatar(title, stats, tuple(email_list))
 
     @staticmethod
     def _bar_chart(title: str, labels: list[str], values: list[int], bar_height: int = 8) -> str:
