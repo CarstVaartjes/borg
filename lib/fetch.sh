@@ -5,10 +5,6 @@
 # Helpers
 # ---------------------------------------------------------------------------
 
-utc_now() {
-    date -u +%Y-%m-%dT%H:%M:%SZ
-}
-
 check_rate_limit() {
     local info
     if ! info=$(gh api rate_limit --jq '.rate | "\(.remaining) \(.reset)"' 2>&1); then
