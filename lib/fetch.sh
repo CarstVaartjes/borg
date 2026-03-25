@@ -85,15 +85,18 @@ fetch_repo_commits() {
 
         # Parse and insert each commit
         local entries
-        entries=$(echo "$json" | jq -r '.[] | [
-            .sha,
-            (.commit.author.name // "unknown"),
-            (.commit.author.email // "unknown"),
-            (.commit.author.date // ""),
-            (.commit.message | split("\n")[0] // "")
-        ] | @tsv' 2>/dev/null) || break
-
-        while IFS=$'\t' read -r sha author email date message; do
+        # Use JSON lines format to handle multi-line commit messages safely
+        local entry_count
+        entry_count=$(echo "$json" | jq 'length')
+        local idx=0
+        while [[ "$idx" -lt "$entry_count" ]]; do
+            local sha author email date message
+            sha=$(echo "$json" | jq -r ".[$idx].sha // \"\"")
+            author=$(echo "$json" | jq -r ".[$idx].commit.author.name // \"unknown\"")
+            email=$(echo "$json" | jq -r ".[$idx].commit.author.email // \"unknown\"")
+            date=$(echo "$json" | jq -r ".[$idx].commit.author.date // \"\"")
+            message=$(echo "$json" | jq -r ".[$idx].commit.message // \"\"")
+            idx=$((idx + 1))
             [[ -z "$sha" ]] && continue
 
             local e_author e_email e_message e_repo
@@ -116,7 +119,7 @@ fetch_repo_commits() {
             if [[ -z "$newest_date" || "$date" > "$newest_date" ]]; then
                 newest_date="$date"
             fi
-        done <<< "$entries"
+        done
 
         # If fewer than 100 results, no more pages
         if [[ "$count" -lt 100 ]]; then
