@@ -287,55 +287,64 @@ class GitHubFetcher:
 
         GitHub squash-merge strips Co-Authored-By trailers. By fetching
         the original PR commits, we recover these trailers for detection.
+        Fetches both merged and open PRs (open PRs have active development).
 
         Args:
             org: Organization name.
             repo: Repository name.
-            since: ISO date to fetch PRs merged after.
+            since: ISO date to fetch PRs updated after.
 
         Returns:
             Tuple of (inserted_count, newest_commit_date).
         """
         inserted = 0
         newest_date: str | None = None
-        url: str | None = (
-            f"{BASE_URL}/repos/{org}/{repo}/pulls?"
-            f"state=closed&sort=updated&direction=desc&per_page=50"
-        )
 
-        while url:
-            try:
-                resp = await self._client.get(url)
-                resp.raise_for_status()
-            except Exception:
-                break
-            prs = resp.json()
-            if not prs:
-                break
+        # Fetch all PRs (open + closed), sorted by recently updated
+        for state in ("closed", "open"):
+            url: str | None = (
+                f"{BASE_URL}/repos/{org}/{repo}/pulls?"
+                f"state={state}&sort=updated&direction=desc&per_page=50"
+            )
 
-            found_old = False
-            for pr in prs:
-                # Only merged PRs
-                merged_at = pr.get("merged_at")
-                if not merged_at:
-                    continue
-                # Stop when we hit PRs merged before our since date
-                if merged_at < since:
-                    found_old = True
+            while url:
+                try:
+                    resp = await self._client.get(url)
+                    resp.raise_for_status()
+                except Exception:
+                    break
+                prs = resp.json()
+                if not prs:
                     break
 
-                # Fetch individual commits for this PR
-                pr_url = f"{BASE_URL}/repos/{org}/{repo}/pulls/{pr['number']}/commits?per_page=100"
-                pr_inserted, pr_date = await self._fetch_paginated_commits(
-                    pr_url, org, repo
-                )
-                inserted += pr_inserted
-                if pr_date and (newest_date is None or pr_date > newest_date):
-                    newest_date = pr_date
+                found_old = False
+                for pr in prs:
+                    # Use merged_at for closed PRs, updated_at for open PRs
+                    pr_date_str = pr.get("merged_at") or pr.get("updated_at", "")
+                    if not pr_date_str:
+                        continue
 
-            if found_old:
-                break
-            url = self._parse_next_url(resp.headers)
+                    # Skip closed-but-not-merged PRs (abandoned)
+                    if state == "closed" and not pr.get("merged_at"):
+                        continue
+
+                    # Stop when we hit PRs older than our since date
+                    if pr_date_str < since:
+                        found_old = True
+                        break
+
+                    # Fetch individual commits for this PR
+                    pr_url = f"{BASE_URL}/repos/{org}/{repo}/pulls/{pr['number']}/commits?per_page=100"
+                    pr_inserted, pr_commit_date = await self._fetch_paginated_commits(
+                        pr_url, org, repo
+                    )
+                    inserted += pr_inserted
+                    if pr_commit_date and (newest_date is None or pr_commit_date > newest_date):
+                        newest_date = pr_commit_date
+
+                if found_old:
+                    break
+                url = self._parse_next_url(resp.headers)
 
         return inserted, newest_date
 
